@@ -24,16 +24,17 @@ include(cmake/CPM.cmake)
 # Downloads this wrapper library and tree-sitter.
 # Makes them available via the `cpp-tree-sitter` CMake library target.
 CPMAddPackage(
-  NAME cpp-tree-sitter
-  GIT_REPOSITORY https://github.com/nsumner/cpp-tree-sitter.git
-  GIT_TAG v0.0.1
+	NAME cpp-tree-sitter
+	GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter
+	GIT_TAG main
 )
 
 # Downloads a tree-sitter grammar from github and makes it available as a
 # cmake library target.
-add_grammar_from_repo(tree-sitter-json                 # Defines the library name for a grammar
-  https://github.com/tree-sitter/tree-sitter-json.git  # Repository URL of a tree-sitter grammar
-  0.19.0                                               # Version tag for the grammar
+add_grammar_from_git_repo(
+	NAME tree-sitter-json                 								# Defines the library name for a grammar
+	GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git  # Repository URL of a tree-sitter grammar
+	VERSION 0.19.0                                              		# Version tag for the grammar
 )
 
 # Use the library in a demo program.

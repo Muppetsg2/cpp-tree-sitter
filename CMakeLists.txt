@@ -32,9 +32,9 @@ endif()
 
 function(add_grammar_from_git_repo)
 
-    set(options)                                    # Bool Options
-    set(oneValueArgs NAME GIT_REPOSITORY VERSION)   # One element arguments
-    set(multiValueArgs)                             # No multi-value arguments
+    set(options)                                    	  # Bool Options
+    set(oneValueArgs NAME GIT_REPOSITORY VERSION GIT_TAG) # One element arguments
+    set(multiValueArgs)                             	  # No multi-value arguments
 
     cmake_parse_arguments(PARSE_ARGV 0 arg
         "${options}" "${oneValueArgs}" "${multiValueArgs}"
@@ -48,20 +48,34 @@ function(add_grammar_from_git_repo)
         message(FATAL_ERROR "add_grammar_from_git_repo requires GIT_REPOSITORY")
     endif()
 
-    if(NOT arg_VERSION)
-        message(FATAL_ERROR "add_grammar_from_git_repo requires VERSION")
+    if(NOT arg_VERSION AND NOT arg_GIT_TAG)
+        message(FATAL_ERROR "add_grammar_from_git_repo requires VERSION or GIT_TAG")
+    endif()
+	
+	if(arg_VERSION AND arg_GIT_TAG)
+        message(FATAL_ERROR "add_grammar_from_git_repo requires either VERSION or GIT_TAG not both")
     endif()
 
     set(NAME ${arg_NAME})
     set(GIT_REPOSITORY ${arg_GIT_REPOSITORY})
     set(VERSION ${arg_VERSION})
-
-    CPMAddPackage(
-        NAME ${NAME}
-        GIT_REPOSITORY ${GIT_REPOSITORY}
-        VERSION ${VERSION}
-        DOWNLOAD_ONLY YES
-    )
+    set(GIT_TAG ${arg_GIT_TAG})
+	
+	if(VERSION)
+	    CPMAddPackage(
+			NAME ${NAME}
+			GIT_REPOSITORY ${GIT_REPOSITORY}
+			VERSION ${VERSION}
+			DOWNLOAD_ONLY YES
+		)
+	elseif(GIT_TAG)
+		CPMAddPackage(
+			NAME ${NAME}
+			GIT_REPOSITORY ${GIT_REPOSITORY}
+			GIT_TAG ${GIT_TAG}
+			DOWNLOAD_ONLY YES
+		)
+	endif()
 
     if ("${${NAME}_ADDED}")
         file(GLOB maybe_scanner "${${NAME}_SOURCE_DIR}/src/scanner.c")
