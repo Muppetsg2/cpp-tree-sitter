@@ -69,7 +69,7 @@ namespace ts {
 			return ts_language_symbol_for_name(impl, &name.front(), static_cast<uint32_t>(name.size()), isNamed);
 		}
 
-		[[nodiscard]] Version getVersion() const { return ts_language_version(impl); }
+		[[nodiscard]] Version getVersion() const { return ts_language_abi_version(impl); }
 
 		const TSLanguage* impl;
 	};
