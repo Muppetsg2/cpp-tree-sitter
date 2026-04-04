@@ -11,8 +11,6 @@ project(
     DESCRIPTION "Simple C++ and CMake wrapper around tree-sitter."
 )
 
-add_compile_options("$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wconversion>")
-
 # We want to automatically download and provide tree-sitter to users of
 # the package, so pull it in and retrofit cmake dependencies on top of it.
 CPMAddPackage(
@@ -26,7 +24,18 @@ if (tree-sitter_ADDED)
     add_library(tree-sitter STATIC "${tree-sitter_SOURCE_DIR}/lib/src/lib.c")
     target_include_directories(tree-sitter PRIVATE $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/src>)
     target_include_directories(tree-sitter PUBLIC  $<INSTALL_INTERFACE:include> $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/include>)
-    target_compile_options(tree-sitter PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-conversion>")
+    target_compile_options(tree-sitter PRIVATE 
+		$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+			/W4
+			/Zc:__cplusplus
+		>
+		$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+			-Wno-unused-but-set-variable
+			-Wno-conversion
+			-Wall
+			-Wextra
+		>
+	)
 endif()
 
 
@@ -88,10 +97,33 @@ function(add_grammar_from_git_repo)
         target_include_directories(${NAME} PUBLIC  $<INSTALL_INTERFACE:include>)
 
         target_link_libraries(${NAME} PRIVATE tree-sitter)
-        target_compile_options(${NAME} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-but-set-variable>")
+        target_compile_options(${NAME} PRIVATE 
+			$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+				/W4
+				/Zc:__cplusplus
+			>
+			$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+				-Wno-unused-but-set-variable
+				-Wno-conversion
+				-Wall
+				-Wextra
+			>
+		)
     endif()
 endfunction()
 
 add_library(cpp-tree-sitter INTERFACE)
 target_include_directories(cpp-tree-sitter INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 target_link_libraries(cpp-tree-sitter INTERFACE tree-sitter)
+target_compile_options(cpp-tree-sitter PRIVATE 
+	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+		/W4
+		/Zc:__cplusplus
+	>
+	$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+		-Wno-unused-but-set-variable
+		-Wno-conversion
+		-Wall
+		-Wextra
+	>
+)
