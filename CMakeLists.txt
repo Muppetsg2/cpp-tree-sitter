@@ -115,7 +115,7 @@ endfunction()
 add_library(cpp-tree-sitter INTERFACE)
 target_include_directories(cpp-tree-sitter INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 target_link_libraries(cpp-tree-sitter INTERFACE tree-sitter)
-target_compile_options(cpp-tree-sitter PRIVATE 
+target_compile_options(cpp-tree-sitter INTERFACE 
 	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
 		/W4
 		/Zc:__cplusplus
