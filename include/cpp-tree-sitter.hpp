@@ -148,7 +148,7 @@ namespace ts
 
         [[nodiscard]] Symbol getSymbolForName(std::string_view name, bool isNamed) const
         {
-            return ts_language_symbol_for_name(impl.get(), &name.front(), static_cast<uint32_t>(name.size()), isNamed);
+            return ts_language_symbol_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()), isNamed);
         }
 
         [[nodiscard]] std::string_view getFieldNameForId(FieldID id) const
@@ -158,23 +158,37 @@ namespace ts
 
         [[nodiscard]] FieldID getFieldIdForName(std::string_view name) const
         {
-            return ts_language_field_id_for_name(impl.get(), &name.front(), static_cast<uint32_t>(name.size()));
+            return ts_language_field_id_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
 
         [[nodiscard]] std::vector<Symbol> getAllSuperTypes() const
         {
             uint32_t length = 0;
             Symbol  *array  = ts_language_supertypes(impl.get(), &length);
+            if (!array)
+            {
+                return {};
+            }
 
-            return std::vector<Symbol> vec(array, array + length);
+            std::vector<Symbol> vec(array, array + length);
+            std::free(array);
+
+            return vec;
         }
 
         [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol superType) const
         {
             uint32_t length = 0;
             Symbol  *array  = ts_language_subtypes(impl.get(), superType, &length);
+            if (!array)
+            {
+                return {};
+            }
 
-            return std::vector<Symbol> vec(array, array + length);
+            std::vector<Symbol> vec(array, array + length);
+            std::free(array);
+
+            return vec;
         }
 
         [[nodiscard]] std::string_view getName() const
@@ -289,7 +303,7 @@ namespace ts
 
         [[nodiscard]] Node getChildByFieldName(std::string_view name) const
         {
-            return Node{ ts_node_child_by_field_name(impl, &name.front(), static_cast<uint32_t>(name.size())) };
+            return Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
         }
 
         // Definition deferred until after the definition of TreeCursor.
@@ -339,7 +353,7 @@ namespace ts
 
         [[nodiscard]] std::string_view getSourceRange(std::string_view source) const
         {
-            Extent<uint32_t> extents = this->getByteRange();
+            Extent<uint32_t> extents = getByteRange();
             return source.substr(extents.start, extents.end - extents.start);
         }
 
@@ -390,7 +404,7 @@ namespace ts
         [[nodiscard]] Tree parseString(std::string_view buffer)
         {
             return Tree{
-                ts_parser_parse_string(impl.get(), nullptr, &buffer.front(), static_cast<uint32_t>(buffer.size()))
+                ts_parser_parse_string(impl.get(), nullptr, buffer.data(), static_cast<uint32_t>(buffer.size()))
             };
         }
 
@@ -398,7 +412,7 @@ namespace ts
         {
             return Tree{ ts_parser_parse_string_encoding(impl.get(),
                                                          nullptr,
-                                                         &buffer.front(),
+                                                         buffer.data(),
                                                          static_cast<uint32_t>(buffer.size()),
                                                          static_cast<TSInputEncoding>(encoding)) };
         }
@@ -478,7 +492,7 @@ namespace ts
             ts_tree_cursor_reset(&impl, node.impl);
         }
 
-        void reset(Cursor &cursor)
+        void reset(TreeCursor &cursor)
         {
             ts_tree_cursor_reset_to(&impl, &cursor.impl);
         }
@@ -653,8 +667,7 @@ namespace ts
 
         void disableCapture(std::string_view name) const
         {
-            ts_query_disable_capture(impl.get(), &name.front(),
-                                                         static_cast<uint32_t>(name.size());
+            ts_query_disable_capture(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
 
         void disablePattern(uint32_t pattern_index) const
