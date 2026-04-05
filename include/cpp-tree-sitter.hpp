@@ -7,6 +7,7 @@
 #include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -94,6 +95,15 @@ namespace ts
     {
         Parse = TSLogTypeParse,
         Lex   = TSLogTypeLex
+    };
+
+    enum class Quantifier : uint8_t
+    {
+        Zero       = TSQuantifierZero,
+        ZeroOrOne  = TSQuantifierZeroOrOne,
+        ZeroOrMore = TSQuantifierZeroOrMore,
+        One        = TSQuantifierOne,
+        OneOrMore  = TSQuantifierOneOrMore,
     };
 
     // For types that manage resources, create custom wrappers that ensure
@@ -187,7 +197,7 @@ namespace ts
     };
 
 
-    class Cursor;
+    class TreeCursor;
 
     struct Node
     {
@@ -282,8 +292,8 @@ namespace ts
             return Node{ ts_node_child_by_field_name(impl, &name.front(), static_cast<uint32_t>(name.size())) };
         }
 
-        // Definition deferred until after the definition of Cursor.
-        [[nodiscard]] Cursor getCursor() const;
+        // Definition deferred until after the definition of TreeCursor.
+        [[nodiscard]] TreeCursor getCursor() const;
 
         ////////////////////////////////////////////////////////////////
         // Node attributes
@@ -314,7 +324,7 @@ namespace ts
 
         [[nodiscard]] Language getLanguage() const
         {
-            return ts_node_language(impl);
+            return Language{ ts_node_language(impl) };
         }
 
         [[nodiscard]] Extent<uint32_t> getByteRange() const
@@ -433,32 +443,32 @@ namespace ts
         std::function<void(LogType, const char *)> current_logger;
     };
 
-    class Cursor
+    class TreeCursor
     {
     public:
-        Cursor(TSNode node) : impl{ ts_tree_cursor_new(node) }
+        TreeCursor(TSNode node) : impl{ ts_tree_cursor_new(node) }
         {}
 
-        Cursor(const TSTreeCursor &cursor) : impl{ ts_tree_cursor_copy(&cursor) }
+        TreeCursor(const TSTreeCursor &cursor) : impl{ ts_tree_cursor_copy(&cursor) }
         {}
 
         // By default avoid copies until the ergonomics are clearer.
-        Cursor(const Cursor &other) = delete;
+        TreeCursor(const TreeCursor &other) = delete;
 
-        Cursor(Cursor &&other) : impl{}
+        TreeCursor(TreeCursor &&other) : impl{}
         {
             std::swap(impl, other.impl);
         }
 
-        Cursor &operator=(const Cursor &other) = delete;
+        TreeCursor &operator=(const TreeCursor &other) = delete;
 
-        Cursor &operator=(Cursor &&other)
+        TreeCursor &operator=(TreeCursor &&other)
         {
             std::swap(impl, other.impl);
             return *this;
         }
 
-        ~Cursor()
+        ~TreeCursor()
         {
             ts_tree_cursor_delete(&impl);
         }
@@ -473,9 +483,9 @@ namespace ts
             ts_tree_cursor_reset_to(&impl, &cursor.impl);
         }
 
-        [[nodiscard]] Cursor copy() const
+        [[nodiscard]] TreeCursor copy() const
         {
-            return Cursor(impl);
+            return TreeCursor(impl);
         }
 
         [[nodiscard]] Node getCurrentNode() const
@@ -520,11 +530,266 @@ namespace ts
     };
 
     // To avoid cyclic dependencies and ODR violations, we define all methods
-    // *using* Cursors inline after the definition of Cursor itself.
-    [[nodiscard]] inline Cursor Node::getCursor() const
+    // *using* TreeCursors inline after the definition of TreeCursor itself.
+    [[nodiscard]] inline TreeCursor Node::getCursor() const
     {
-        return Cursor{ impl };
+        return TreeCursor{ impl };
     }
+
+    ////////////////////////////////////////////////////////////////
+    // Query
+    ////////////////////////////////////////////////////////////////
+
+    class Query
+    {
+    public:
+        Query(Language language, std::string_view source)
+        {
+            uint32_t     error_offset;
+            TSQueryError error_type;
+
+            TSQuery *query = ts_query_new(language,
+                                          source.data(),
+                                          static_cast<uint32_t>(source.size()),
+                                          &error_offset,
+                                          &error_type);
+
+            if (!query)
+            {
+                std::string error_type_str = "None";
+
+                switch (error_type)
+                {
+                    case TSQueryErrorSyntax:
+                    {
+                        error_type_str = "Syntax";
+                        break;
+                    }
+                    case TSQueryErrorNodeType:
+                    {
+                        error_type_str = "Node Type";
+                        break;
+                    }
+                    case TSQueryErrorField:
+                    {
+                        error_type_str = "Field";
+                        break;
+                    }
+                    case TSQueryErrorCapture:
+                    {
+                        error_type_str = "Capture";
+                        break;
+                    }
+                    case TSQueryErrorStructure:
+                    {
+                        error_type_str = "Structure";
+                        break;
+                    }
+                    case TSQueryErrorLanguage:
+                    {
+                        error_type_str = "Language";
+                        break;
+                    }
+                    default:
+                        break;
+                }
+
+                throw std::runtime_error("Tree-sitter Query Error at offset " + std::to_string(error_offset)
+                                         + " (Type: " + error_type_str + ")");
+            }
+            impl.reset(query);
+        }
+
+        [[nodiscard]] bool isPatternRooted(uint32_t pattern_index) const
+        {
+            return ts_query_is_pattern_rooted(impl.get(), pattern_index);
+        }
+
+        [[nodiscard]] bool isPatternNonLocal(uint32_t pattern_index) const
+        {
+            return ts_query_is_pattern_non_local(impl.get(), pattern_index);
+        }
+
+        [[nodiscard]] uint32_t getCaptureCount() const
+        {
+            return ts_query_capture_count(impl.get());
+        }
+
+        [[nodiscard]] uint32_t getPatternCount() const
+        {
+            return ts_query_pattern_count(impl.get());
+        }
+
+        [[nodiscard]] uint32_t getStringCount() const
+        {
+            return ts_query_string_count(impl.get());
+        }
+
+        [[nodiscard]] Extent<uint32_t> getByteRangeForPattern(uint32_t pattern_index) const
+        {
+            return { ts_query_start_byte_for_pattern(impl.get(), pattern_index),
+                     ts_query_end_byte_for_pattern(impl.get(), pattern_index) };
+        }
+
+        [[nodiscard]] std::string_view getCaptureNameForId(uint32_t id) const
+        {
+            uint32_t    length;
+            const char *name = ts_query_capture_name_for_id(impl.get(), id, &length);
+            return { name, length };
+        }
+
+        [[nodiscard]] Quantifier getCaptureQuantifierForId(uint32_t pattern_index, uint32_t capture_index) const
+        {
+            return static_cast<Quantifier>(
+                    ts_query_capture_quantifier_for_id(impl.get(), pattern_index, capture_index));
+        }
+
+        [[nodiscard]] std::string_view getStringValueForId(uint32_t id) const
+        {
+            uint32_t    length;
+            const char *name = ts_query_string_value_for_id(impl.get(), id, &length);
+            return { name, length };
+        }
+
+        void disableCapture(std::string_view name) const
+        {
+            ts_query_disable_capture(impl.get(), &name.front(),
+                                                         static_cast<uint32_t>(name.size());
+        }
+
+        void disablePattern(uint32_t pattern_index) const
+        {
+            ts_query_disable_pattern(impl.get(), pattern_index);
+        }
+
+        [[nodiscard]] operator const TSQuery *() const
+        {
+            return impl.get();
+        }
+
+    private:
+        std::unique_ptr<TSQuery, decltype(&ts_query_delete)> impl{ nullptr, ts_query_delete };
+    };
+
+    struct QueryCapture
+    {
+        Node     node;
+        uint32_t index;
+
+        // for easy conversion from C API
+        explicit QueryCapture(const TSQueryCapture &capture) : node(capture.node), index(capture.index)
+        {}
+    };
+
+    struct QueryMatch
+    {
+        uint32_t id;
+        uint16_t pattern_index;
+
+        // A vector is used for easy access; however, note that data copying occurs only when the QueryMatch object is
+        // instantiated.
+        std::vector<QueryCapture> captures;
+
+        explicit QueryMatch(const TSQueryMatch &match) : id(match.id), pattern_index(match.pattern_index)
+        {
+            captures.reserve(match.capture_count);
+            for (uint32_t i = 0; i < match.capture_count; ++i)
+            {
+                captures.emplace_back(match.captures[i]);
+            }
+        }
+    };
+
+    class QueryCursor
+    {
+    public:
+        QueryCursor() : impl{ ts_query_cursor_new(), ts_query_cursor_delete }
+        {}
+
+        // In C API QueryCursor don't have copy function
+        QueryCursor(const QueryCursor &)            = delete;
+        QueryCursor &operator=(const QueryCursor &) = delete;
+        QueryCursor(QueryCursor &&)                 = default;
+        QueryCursor &operator=(QueryCursor &&)      = default;
+
+        void exec(const Query &query, Node node)
+        {
+            ts_query_cursor_exec(impl.get(), query, node.impl);
+        }
+
+        [[nodiscard]] bool didExceedMatchLimit()
+        {
+            return ts_query_cursor_did_exceed_match_limit(impl.get());
+        }
+
+        [[nodiscard]] uint32_t getMatchLimit()
+        {
+            return ts_query_cursor_match_limit(impl.get());
+        }
+
+        void setMatchLimit(uint32_t limit)
+        {
+            ts_query_cursor_set_match_limit(impl.get(), limit);
+        }
+
+        void setMaxStartDepth(uint32_t max_start_depth)
+        {
+            ts_query_cursor_set_max_start_depth(impl.get(), max_start_depth);
+        }
+
+        [[nodiscard]] bool setByteRange(Extent<uint32_t> range)
+        {
+            return ts_query_cursor_set_byte_range(impl.get(), range.start, range.end);
+        }
+
+        [[nodiscard]] bool setPointRange(Extent<Point> range)
+        {
+            return ts_query_cursor_set_point_range(impl.get(), range.start, range.end);
+        }
+
+        [[nodiscard]] bool setContainingByteRange(Extent<uint32_t> range)
+        {
+            return ts_query_cursor_set_containing_byte_range(impl.get(), range.start, range.end);
+        }
+
+        [[nodiscard]] bool setContainingPointRange(Extent<Point> range)
+        {
+            return ts_query_cursor_set_containing_point_range(impl.get(), range.start, range.end);
+        }
+
+        [[nodiscard]] bool nextMatch(QueryMatch &match)
+        {
+            TSQueryMatch c_match{};
+            if (ts_query_cursor_next_match(impl.get(), &c_match))
+            {
+                match = QueryMatch(c_match);
+                return true;
+            }
+            return false;
+        }
+
+        [[nodiscard]] bool nextCapture(QueryMatch &match, uint32_t &capture_index)
+        {
+            TSQueryMatch c_match{};
+            uint32_t     c_capture_index = 0;
+
+            if (ts_query_cursor_next_capture(impl.get(), &c_match, &c_capture_index))
+            {
+                match         = QueryMatch(c_match);
+                capture_index = c_capture_index;
+                return true;
+            }
+            return false;
+        }
+
+        void removeMatch(uint32_t match_id)
+        {
+            return ts_query_cursor_remove_match(impl.get(), match_id);
+        }
+
+    private:
+        std::unique_ptr<TSQueryCursor, decltype(&ts_query_cursor_delete)> impl;
+    };
 
     ////////////////////////////////////////////////////////////////
     // Child node iterators
@@ -584,8 +849,8 @@ namespace ts
         }
 
     private:
-        ts::Cursor cursor;
-        bool       atEnd;
+        ts::TreeCursor cursor;
+        bool           atEnd;
     };
 
     struct Children
@@ -644,7 +909,7 @@ namespace ts
             return;
         }
 
-        Cursor       cursor      = root.getCursor();
+        TreeCursor   cursor      = root.getCursor();
         const size_t start_depth = cursor.getDepthFromOrigin();
 
         while (true)
