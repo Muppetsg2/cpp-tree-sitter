@@ -3,9 +3,12 @@
 #define CPP_TREE_SITTER_HPP
 
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <memory>
+#include <stdexcept>
 #include <string_view>
+#include <vector>
 
 #if defined(_MSVC_LANG)
 #define CPP_STANDARD _MSVC_LANG
@@ -65,44 +68,122 @@ namespace ts
 
     using Symbol = uint16_t;
 
+    using FieldID = uint16_t;
+
     using Version = uint32_t;
 
     using NodeID = uintptr_t;
+
+    // Enums wrappers
+    enum class SymbolType : uint8_t
+    {
+        TypeRegular   = TSSymbolTypeRegular,
+        TypeAnonymous = TSSymbolTypeAnonymous,
+        TypeSupertype = TSSymbolTypeSupertype,
+        TypeAuxiliary = TSSymbolTypeAuxiliary,
+    };
+
+    enum class InputEncoding : uint8_t
+    {
+        UTF8    = TSInputEncodingUTF8,
+        UTF16LE = TSInputEncodingUTF16LE,
+        UTF16BE = TSInputEncodingUTF16BE
+    };
+
+    enum class LogType : uint8_t
+    {
+        Parse = TSLogTypeParse,
+        Lex   = TSLogTypeLex
+    };
 
     // For types that manage resources, create custom wrappers that ensure
     // clean-up. For types that can benefit from additional API discovery,
     // wrappers with implicit conversion allow for automated method discovery.
 
-    struct Language
+    class Language
     {
+    public:
         // NOTE: Allowing implicit conversions from TSLanguage to Language
         // improves the ergonomics a bit, as clients will still make use of the
         // custom language functions.
 
-        /* implicit */ Language(const TSLanguage *language) : impl{ language }
+        /* implicit */ Language(const TSLanguage *language)
+            : impl{ language, [](const TSLanguage *l) { ts_language_delete(l); } }
         {}
 
         [[nodiscard]] size_t getNumSymbols() const
         {
-            return ts_language_symbol_count(impl);
+            return ts_language_symbol_count(impl.get());
+        }
+
+        [[nodiscard]] size_t getNumStates() const
+        {
+            return ts_language_state_count(impl.get());
+        }
+
+        [[nodiscard]] size_t getNumFields() const
+        {
+            return ts_language_field_count(impl.get());
         }
 
         [[nodiscard]] std::string_view getSymbolName(Symbol symbol) const
         {
-            return ts_language_symbol_name(impl, symbol);
+            return ts_language_symbol_name(impl.get(), symbol);
+        }
+
+        [[nodiscard]] SymbolType getSymbolType(Symbol symbol) const
+        {
+            return static_cast<SymbolType>(ts_language_symbol_type(impl.get(), symbol));
         }
 
         [[nodiscard]] Symbol getSymbolForName(std::string_view name, bool isNamed) const
         {
-            return ts_language_symbol_for_name(impl, &name.front(), static_cast<uint32_t>(name.size()), isNamed);
+            return ts_language_symbol_for_name(impl.get(), &name.front(), static_cast<uint32_t>(name.size()), isNamed);
+        }
+
+        [[nodiscard]] std::string_view getFieldNameForId(FieldID id) const
+        {
+            return ts_language_field_name_for_id(impl.get(), id);
+        }
+
+        [[nodiscard]] FieldID getFieldIdForName(std::string_view name) const
+        {
+            return ts_language_field_id_for_name(impl.get(), &name.front(), static_cast<uint32_t>(name.size()));
+        }
+
+        [[nodiscard]] std::vector<Symbol> getAllSuperTypes() const
+        {
+            uint32_t length = 0;
+            Symbol  *array  = ts_language_supertypes(impl.get(), &length);
+
+            return std::vector<Symbol> vec(array, array + length);
+        }
+
+        [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol superType) const
+        {
+            uint32_t length = 0;
+            Symbol  *array  = ts_language_subtypes(impl.get(), superType, &length);
+
+            return std::vector<Symbol> vec(array, array + length);
+        }
+
+        [[nodiscard]] std::string_view getName() const
+        {
+            return ts_language_name(impl.get());
         }
 
         [[nodiscard]] Version getVersion() const
         {
-            return ts_language_abi_version(impl);
+            return ts_language_abi_version(impl.get());
         }
 
-        const TSLanguage *impl;
+        [[nodiscard]] operator const TSLanguage *() const
+        {
+            return impl.get();
+        }
+
+    private:
+        std::shared_ptr<const TSLanguage> impl;
     };
 
 
@@ -285,16 +366,71 @@ namespace ts
     public:
         Parser(Language language) : impl{ ts_parser_new(), ts_parser_delete }
         {
-            ts_parser_set_language(impl.get(), language.impl);
+            if (!setLanguage(language))
+            {
+                throw std::runtime_error("Tree-sitter: Language version mismatch");
+            }
+        }
+
+        [[nodiscard]] Language getCurrentLanguage() const
+        {
+            return Language{ ts_parser_language(impl.get()) };
         }
 
         [[nodiscard]] Tree parseString(std::string_view buffer)
         {
-            return ts_parser_parse_string(impl.get(), nullptr, &buffer.front(), static_cast<uint32_t>(buffer.size()));
+            return Tree{
+                ts_parser_parse_string(impl.get(), nullptr, &buffer.front(), static_cast<uint32_t>(buffer.size()))
+            };
+        }
+
+        [[nodiscard]] Tree parseStringEncoded(std::string_view buffer, InputEncoding encoding)
+        {
+            return Tree{ ts_parser_parse_string_encoding(impl.get(),
+                                                         nullptr,
+                                                         &buffer.front(),
+                                                         static_cast<uint32_t>(buffer.size()),
+                                                         static_cast<TSInputEncoding>(encoding)) };
+        }
+
+        [[nodiscard]] bool setLanguage(Language language)
+        {
+            return ts_parser_set_language(impl.get(), language);
+        }
+
+        void setLogger(std::function<void(LogType, const char *)> logger_func)
+        {
+            current_logger = std::move(logger_func);
+
+            TSLogger ts_logger{};
+            ts_logger.payload = this;
+            ts_logger.log     = [](void *payload, TSLogType log_type, const char *buffer)
+            {
+                auto *self = static_cast<Parser *>(payload);
+                if (self->current_logger)
+                {
+                    self->current_logger(static_cast<LogType>(log_type), buffer);
+                }
+            };
+
+            ts_parser_set_logger(impl.get(), ts_logger);
+        }
+
+        void removeLogger()
+        {
+            current_logger = nullptr;
+            ts_parser_set_logger(impl.get(), { nullptr, nullptr });
+        }
+
+        void reset()
+        {
+            ts_parser_reset(impl.get());
         }
 
     private:
         std::unique_ptr<TSParser, decltype(&ts_parser_delete)> impl;
+
+        std::function<void(LogType, const char *)> current_logger;
     };
 
     class Cursor
@@ -472,6 +608,10 @@ namespace ts
 
     static_assert(std::input_iterator<ChildIterator>);
     static_assert(std::sentinel_for<ChildIteratorSentinel, ChildIterator>);
+
+    ////////////////////////////////////////////////////////////////
+    // Visitor
+    ////////////////////////////////////////////////////////////////
 
     // These visitor concept make it easy to check all nodes in tree
 #ifdef TS_CXX_17
