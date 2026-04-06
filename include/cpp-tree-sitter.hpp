@@ -11,6 +11,10 @@
 #include <string_view>
 #include <vector>
 
+/////////////////////////////////////////////////////////////////////////////
+// Standard Compatibility Macros
+/////////////////////////////////////////////////////////////////////////////
+
 #if defined(_MSVC_LANG)
 #define CPP_STANDARD _MSVC_LANG
 #else
@@ -27,18 +31,18 @@
 #define TS_CXX_17
 #endif
 
-#include <tree_sitter/api.h>
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#include <optional>
+#endif
 
-// Including the API directly already pollutes the namespace, but the
-// functions are prefixed. Anything else that we include should be scoped
-// within a namespace.
+#include <tree_sitter/api.h>
 
 namespace ts
 {
 
     /////////////////////////////////////////////////////////////////////////////
-    // Helper classes.
-    // These can be ignored while tring to understand the core APIs on demand.
+    // Helper classes
+    // Internal utilities for memory management and range representation.
     /////////////////////////////////////////////////////////////////////////////
 
     struct FreeHelper
@@ -67,28 +71,34 @@ namespace ts
     // Direct alias of { row: uint32_t; column: uint32_t }
     using Point = TSPoint;
 
-    using Symbol = uint16_t;
+    // Direct alias of { major_version: uint8_t; minor_version: uint8_t; patch_version: uint8_t }
+    using LanguageMetadata = TSLanguageMetadata;
 
+    using StateID = uint16_t;
+    using Symbol  = uint16_t;
     using FieldID = uint16_t;
-
     using Version = uint32_t;
+    using NodeID  = uintptr_t;
 
-    using NodeID = uintptr_t;
+    /////////////////////////////////////////////////////////////////////////////
+    // Enums.
+    // Scoped enum wrappers for Tree-sitter constants to ensure type safety.
+    /////////////////////////////////////////////////////////////////////////////
 
-    // Enums wrappers
+    enum class InputEncoding : uint8_t
+    {
+        UTF8    = TSInputEncodingUTF8,
+        UTF16LE = TSInputEncodingUTF16LE,
+        UTF16BE = TSInputEncodingUTF16BE,
+        Custom  = TSInputEncodingCustom
+    };
+
     enum class SymbolType : uint8_t
     {
         TypeRegular   = TSSymbolTypeRegular,
         TypeAnonymous = TSSymbolTypeAnonymous,
         TypeSupertype = TSSymbolTypeSupertype,
         TypeAuxiliary = TSSymbolTypeAuxiliary,
-    };
-
-    enum class InputEncoding : uint8_t
-    {
-        UTF8    = TSInputEncodingUTF8,
-        UTF16LE = TSInputEncodingUTF16LE,
-        UTF16BE = TSInputEncodingUTF16BE
     };
 
     enum class LogType : uint8_t
@@ -106,20 +116,48 @@ namespace ts
         OneOrMore  = TSQuantifierOneOrMore,
     };
 
-    // For types that manage resources, create custom wrappers that ensure
-    // clean-up. For types that can benefit from additional API discovery,
-    // wrappers with implicit conversion allow for automated method discovery.
+    /////////////////////////////////////////////////////////////////////////////
+    // Range
+    // Representation of a range within the source code using points and bytes.
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct Range
+    {
+        Extent<Point>    point;
+        Extent<uint32_t> byte;
+
+        explicit Range(const TSRange &range)
+            : point(range.start_point, range.end_point), byte(range.start_byte, range.end_byte)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Language
+    // Represents a Tree-sitter grammar with metadata and symbol definitions.
+    /////////////////////////////////////////////////////////////////////////////
 
     class Language
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         // NOTE: Allowing implicit conversions from TSLanguage to Language
-        // improves the ergonomics a bit, as clients will still make use of the
-        // custom language functions.
+        // improves ergonomics for clients using external grammar providers.
 
         /* implicit */ Language(const TSLanguage *language)
             : impl{ language, [](const TSLanguage *l) { ts_language_delete(l); } }
         {}
+
+        Language(const Language &other) : Language(ts_language_copy(other.impl.get()))
+        {}
+
+        Language(Language &&other) noexcept = default;
+
+        ////////////////////////////////////////////////////////////////
+        // Num Accessors
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] size_t getNumSymbols() const
         {
@@ -136,6 +174,10 @@ namespace ts
             return ts_language_field_count(impl.get());
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Symbol Resolution
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] std::string_view getSymbolName(Symbol symbol) const
         {
             return ts_language_symbol_name(impl.get(), symbol);
@@ -151,6 +193,10 @@ namespace ts
             return ts_language_symbol_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()), isNamed);
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Field Resolution
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] std::string_view getFieldNameForId(FieldID id) const
         {
             return ts_language_field_name_for_id(impl.get(), id);
@@ -160,6 +206,10 @@ namespace ts
         {
             return ts_language_field_id_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Type Hierarchy
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] std::vector<Symbol> getAllSuperTypes() const
         {
@@ -176,10 +226,10 @@ namespace ts
             return vec;
         }
 
-        [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol superType) const
+        [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol supertype) const
         {
             uint32_t length = 0;
-            Symbol  *array  = ts_language_subtypes(impl.get(), superType, &length);
+            Symbol  *array  = ts_language_subtypes(impl.get(), supertype, &length);
             if (!array)
             {
                 return {};
@@ -191,6 +241,19 @@ namespace ts
             return vec;
         }
 
+        ////////////////////////////////////////////////////////////////
+        // State Navigation
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] StateID getNextState(StateID state, Symbol symbol) const
+        {
+            return ts_language_next_state(impl.get(), state, symbol);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Metadata
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] std::string_view getName() const
         {
             return ts_language_name(impl.get());
@@ -201,6 +264,36 @@ namespace ts
             return ts_language_abi_version(impl.get());
         }
 
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+        [[nodiscard]] std::optional<LanguageMetadata> getMetadata() const
+#else
+        [[nodiscard]] LanguageMetadata getMetadata() const
+#endif
+        {
+            const TSLanguageMetadata *metadata = ts_language_metadata(impl.get());
+            if (!metadata)
+            {
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+                return std::nullopt;
+#else
+                return { 0, 0, 0 };
+#endif
+            }
+            return LanguageMetadata{ metadata->major_version, metadata->minor_version, metadata->patch_version };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        Language &operator=(Language other)
+        {
+            std::swap(impl, other.impl);
+            return *this;
+        }
+
+        Language &operator=(Language &&other) noexcept = default;
+
         [[nodiscard]] operator const TSLanguage *() const
         {
             return impl.get();
@@ -210,17 +303,26 @@ namespace ts
         std::shared_ptr<const TSLanguage> impl;
     };
 
+    /////////////////////////////////////////////////////////////////////////////
+    // Node
+    // A single node in a parse tree, providing navigation and attributes.
+    /////////////////////////////////////////////////////////////////////////////
 
     class TreeCursor;
 
     struct Node
     {
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         explicit Node(TSNode node) : impl{ node }
         {}
 
         ////////////////////////////////////////////////////////////////
-        // Flag checks on nodes
+        // Flag Checks
         ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] bool isNull() const
         {
             return ts_node_is_null(impl);
@@ -252,7 +354,7 @@ namespace ts
         }
 
         ////////////////////////////////////////////////////////////////
-        // Navigation
+        // Navigation (Direct)
         ////////////////////////////////////////////////////////////////
 
         // Direct parent/sibling/child connections and cursors
@@ -272,11 +374,6 @@ namespace ts
             return Node{ ts_node_next_sibling(impl) };
         }
 
-        [[nodiscard]] Node getChildWithDescendant(Node descendant) const
-        {
-            return Node{ ts_node_child_with_descendant(impl, descendant.impl) };
-        }
-
         [[nodiscard]] uint32_t getNumChildren() const
         {
             return ts_node_child_count(impl);
@@ -286,6 +383,15 @@ namespace ts
         {
             return Node{ ts_node_child(impl, position) };
         }
+
+        [[nodiscard]] Node getChildWithDescendant(Node descendant) const
+        {
+            return Node{ ts_node_child_with_descendant(impl, descendant.impl) };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Navigation (Range-based)
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] Node getFirstChildForByte(uint32_t byte) const
         {
@@ -307,7 +413,9 @@ namespace ts
             return Node{ ts_node_descendant_for_point_range(impl, range.start, range.end) };
         }
 
-        // Named children
+        ////////////////////////////////////////////////////////////////
+        // Named Children
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] Node getPreviousNamedSibling() const
         {
@@ -344,7 +452,9 @@ namespace ts
             return Node{ ts_node_named_descendant_for_point_range(impl, range.start, range.end) };
         }
 
-        // Named fields
+        ////////////////////////////////////////////////////////////////
+        // Fields
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] std::string_view getFieldNameForChild(uint32_t child_position) const
         {
@@ -361,15 +471,18 @@ namespace ts
             return Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Cursor Creation
+        ////////////////////////////////////////////////////////////////
+
         // Definition deferred until after the definition of TreeCursor.
         [[nodiscard]] TreeCursor getCursor() const;
 
         ////////////////////////////////////////////////////////////////
-        // Node attributes
+        // Attributes
         ////////////////////////////////////////////////////////////////
 
         // Returns a unique identifier for a node in a parse tree.
-        // NodeIDs are numeric value types.
         [[nodiscard]] NodeID getID() const
         {
             return reinterpret_cast<NodeID>(impl.id);
@@ -406,6 +519,10 @@ namespace ts
             return { ts_node_start_point(impl), ts_node_end_point(impl) };
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Source Text Access
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] std::string_view getSourceRange(std::string_view source) const
         {
             if (this->isNull())
@@ -426,6 +543,10 @@ namespace ts
             return std::string(getSourceRange(source));
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Comparison
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] bool operator==(const Node &other) const
         {
             return ts_node_eq(impl, other.impl);
@@ -439,11 +560,33 @@ namespace ts
         TSNode impl;
     };
 
+    /////////////////////////////////////////////////////////////////////////////
+    // Tree
+    // Manages the lifetime of a complete parse tree.
+    /////////////////////////////////////////////////////////////////////////////
+
     class Tree
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         Tree(TSTree *tree) : impl{ tree, ts_tree_delete }
         {}
+
+        ////////////////////////////////////////////////////////////////
+        // Flags
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] bool hasError() const
+        {
+            return getRootNode().hasError();
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Getters
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] Node getRootNode() const
         {
@@ -455,18 +598,22 @@ namespace ts
             return Language{ ts_tree_language(impl.get()) };
         }
 
-        [[nodiscard]] bool hasError() const
-        {
-            return getRootNode().hasError();
-        }
-
     private:
         std::unique_ptr<TSTree, decltype(&ts_tree_delete)> impl;
     };
 
+    /////////////////////////////////////////////////////////////////////////////
+    // Parser
+    // State machine used to produce a syntax tree from source code.
+    /////////////////////////////////////////////////////////////////////////////
+
     class Parser
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         Parser(Language language) : impl{ ts_parser_new(), ts_parser_delete }
         {
             if (!setLanguage(language))
@@ -475,10 +622,23 @@ namespace ts
             }
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Configuration
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] bool setLanguage(Language language)
+        {
+            return ts_parser_set_language(impl.get(), language);
+        }
+
         [[nodiscard]] Language getCurrentLanguage() const
         {
             return Language{ ts_parser_language(impl.get()) };
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Parsing
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] Tree parseString(std::string_view buffer)
         {
@@ -496,10 +656,9 @@ namespace ts
                                                          static_cast<TSInputEncoding>(encoding)) };
         }
 
-        [[nodiscard]] bool setLanguage(Language language)
-        {
-            return ts_parser_set_language(impl.get(), language);
-        }
+        ////////////////////////////////////////////////////////////////
+        // Logging
+        ////////////////////////////////////////////////////////////////
 
         void setLogger(std::function<void(LogType, const char *)> logger_func)
         {
@@ -525,6 +684,11 @@ namespace ts
             ts_parser_set_logger(impl.get(), { nullptr, nullptr });
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Reset
+        ////////////////////////////////////////////////////////////////
+
+        // Does not remove logger
         void reset()
         {
             ts_parser_reset(impl.get());
@@ -532,13 +696,21 @@ namespace ts
 
     private:
         std::unique_ptr<TSParser, decltype(&ts_parser_delete)> impl;
-
-        std::function<void(LogType, const char *)> current_logger;
+        std::function<void(LogType, const char *)>             current_logger;
     };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // TreeCursor
+    // A stateful pointer for walking a syntax tree efficiently.
+    /////////////////////////////////////////////////////////////////////////////
 
     class TreeCursor
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         TreeCursor(TSNode node) : impl{ ts_tree_cursor_new(node) }
         {}
 
@@ -553,18 +725,14 @@ namespace ts
             std::swap(impl, other.impl);
         }
 
-        TreeCursor &operator=(const TreeCursor &other) = delete;
-
-        TreeCursor &operator=(TreeCursor &&other)
-        {
-            std::swap(impl, other.impl);
-            return *this;
-        }
-
         ~TreeCursor()
         {
             ts_tree_cursor_delete(&impl);
         }
+
+        ////////////////////////////////////////////////////////////////
+        // State Control
+        ////////////////////////////////////////////////////////////////
 
         void reset(Node node)
         {
@@ -586,7 +754,9 @@ namespace ts
             return Node{ ts_tree_cursor_current_node(&impl) };
         }
 
+        ////////////////////////////////////////////////////////////////
         // Navigation
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] bool gotoParent()
         {
@@ -618,6 +788,18 @@ namespace ts
             return ts_tree_cursor_current_depth(&impl);
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        TreeCursor &operator=(const TreeCursor &other) = delete;
+
+        TreeCursor &operator=(TreeCursor &&other)
+        {
+            std::swap(impl, other.impl);
+            return *this;
+        }
+
     private:
         TSTreeCursor impl;
     };
@@ -629,13 +811,18 @@ namespace ts
         return TreeCursor{ impl };
     }
 
-    ////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////
     // Query
-    ////////////////////////////////////////////////////////////////
+    // Compiled set of patterns used to search for structures in a syntax tree.
+    /////////////////////////////////////////////////////////////////////////////
 
     class Query
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         Query(Language language, std::string_view source)
         {
             uint32_t     error_offset;
@@ -693,6 +880,10 @@ namespace ts
             impl.reset(query);
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Pattern Information
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] bool isPatternRooted(uint32_t pattern_index) const
         {
             return ts_query_is_pattern_rooted(impl.get(), pattern_index);
@@ -724,6 +915,10 @@ namespace ts
                      ts_query_end_byte_for_pattern(impl.get(), pattern_index) };
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Capture Resolution
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] std::string_view getCaptureNameForId(uint32_t id) const
         {
             uint32_t    length;
@@ -744,6 +939,10 @@ namespace ts
             return { name, length };
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Modification
+        ////////////////////////////////////////////////////////////////
+
         void disableCapture(std::string_view name) const
         {
             ts_query_disable_capture(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
@@ -754,6 +953,10 @@ namespace ts
             ts_query_disable_pattern(impl.get(), pattern_index);
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] operator const TSQuery *() const
         {
             return impl.get();
@@ -763,12 +966,17 @@ namespace ts
         std::unique_ptr<TSQuery, decltype(&ts_query_delete)> impl{ nullptr, ts_query_delete };
     };
 
+    /////////////////////////////////////////////////////////////////////////////
+    // Query Results
+    // Structures representing matches and captures from a Query.
+    /////////////////////////////////////////////////////////////////////////////
+
     struct QueryCapture
     {
         Node     node;
         uint32_t index;
 
-        // for easy conversion from C API
+        // For easy conversion from C API
         explicit QueryCapture(const TSQueryCapture &capture) : node(capture.node), index(capture.index)
         {}
     };
@@ -792,9 +1000,18 @@ namespace ts
         }
     };
 
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryCursor
+    // Executes queries and iterates over matches.
+    /////////////////////////////////////////////////////////////////////////////
+
     class QueryCursor
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         QueryCursor() : impl{ ts_query_cursor_new(), ts_query_cursor_delete }
         {}
 
@@ -804,10 +1021,18 @@ namespace ts
         QueryCursor(QueryCursor &&)                 = default;
         QueryCursor &operator=(QueryCursor &&)      = default;
 
+        ////////////////////////////////////////////////////////////////
+        // Execution
+        ////////////////////////////////////////////////////////////////
+
         void exec(const Query &query, Node node)
         {
             ts_query_cursor_exec(impl.get(), query, node.impl);
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Limits
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] bool didExceedMatchLimit()
         {
@@ -829,6 +1054,10 @@ namespace ts
             ts_query_cursor_set_max_start_depth(impl.get(), max_start_depth);
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Range Configuration
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] bool setByteRange(Extent<uint32_t> range)
         {
             return ts_query_cursor_set_byte_range(impl.get(), range.start, range.end);
@@ -848,6 +1077,10 @@ namespace ts
         {
             return ts_query_cursor_set_containing_point_range(impl.get(), range.start, range.end);
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Iteration
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] bool nextMatch(QueryMatch &match)
         {
@@ -883,12 +1116,10 @@ namespace ts
         std::unique_ptr<TSQueryCursor, decltype(&ts_query_cursor_delete)> impl;
     };
 
-    ////////////////////////////////////////////////////////////////
-    // Child node iterators
-    ////////////////////////////////////////////////////////////////
-
-    // These iterators make it possible to use C++ views on Nodes for
-    // easy processing.
+    /////////////////////////////////////////////////////////////////////////////
+    // Child Node Iterators
+    // STL-compatible iterators for processing Node children.
+    /////////////////////////////////////////////////////////////////////////////
 
     class ChildIteratorSentinel
     {};
@@ -896,17 +1127,33 @@ namespace ts
     class ChildIterator
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Aliases
+        ////////////////////////////////////////////////////////////////
+
         using value_type        = ts::Node;
         using difference_type   = int;
         using iterator_category = std::input_iterator_tag;
 
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         explicit ChildIterator(const ts::Node &node) : cursor{ node.getCursor() }, atEnd{ !cursor.gotoFirstChild() }
         {}
+
+        ////////////////////////////////////////////////////////////////
+        // Get
+        ////////////////////////////////////////////////////////////////
 
         value_type operator*() const
         {
             return cursor.getCurrentNode();
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Advance
+        ////////////////////////////////////////////////////////////////
 
         ChildIterator &operator++()
         {
@@ -919,6 +1166,10 @@ namespace ts
             atEnd = !cursor.gotoNextSibling();
             return *this;
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Comparision
+        ////////////////////////////////////////////////////////////////
 
         friend bool operator==(const ChildIterator &a, const ChildIteratorSentinel &)
         {
@@ -963,15 +1214,17 @@ namespace ts
         const ts::Node &node;
     };
 
+#if defined(TS_CXX_20)
     static_assert(std::input_iterator<ChildIterator>);
     static_assert(std::sentinel_for<ChildIteratorSentinel, ChildIterator>);
+#endif
 
-    ////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////
     // Visitor
-    ////////////////////////////////////////////////////////////////
+    // High-level utility for depth-first traversal of a syntax tree.
+    /////////////////////////////////////////////////////////////////////////////
 
-    // These visitor concept make it easy to check all nodes in tree
-#ifdef TS_CXX_17
+#if defined(TS_CXX_17)
     template <typename T, typename = void>
     struct VisitorConcept : std::false_type
     {};
@@ -984,7 +1237,7 @@ namespace ts
     {};
 
     template <typename F, std::enable_if_t<VisitorConcept<F>::value, bool> = true>
-#elif TS_CXX_20
+#elif defined(TS_CXX_20)
     template <typename T>
     concept VisitorConcept = requires {
         { std::declval<T>()(std::declval<Node>()) } -> std::same_as<void>;
@@ -1046,4 +1299,4 @@ namespace ts
     }
 
 } // namespace ts
-#endif
+#endif // CPP_TREE_SITTER_HPP
