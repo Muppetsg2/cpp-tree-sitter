@@ -272,6 +272,11 @@ namespace ts
             return Node{ ts_node_next_sibling(impl) };
         }
 
+        [[nodiscard]] Node getChildWithDescendant(Node descendant) const
+        {
+            return Node{ ts_node_child_with_descendant(impl, descendant.impl) };
+        }
+
         [[nodiscard]] uint32_t getNumChildren() const
         {
             return ts_node_child_count(impl);
@@ -282,7 +287,37 @@ namespace ts
             return Node{ ts_node_child(impl, position) };
         }
 
+        [[nodiscard]] Node getFirstChildForByte(uint32_t byte) const
+        {
+            return Node{ ts_node_first_child_for_byte(impl, byte) };
+        }
+
+        [[nodiscard]] uint32_t getNumDescendants() const
+        {
+            return ts_node_descendant_count(impl);
+        }
+
+        [[nodiscard]] Node getDescendantForByteRange(Extent<uint32_t> range) const
+        {
+            return Node{ ts_node_descendant_for_byte_range(impl, range.start, range.end) };
+        }
+
+        [[nodiscard]] Node getDescendantForPointRange(Extent<Point> range) const
+        {
+            return Node{ ts_node_descendant_for_point_range(impl, range.start, range.end) };
+        }
+
         // Named children
+
+        [[nodiscard]] Node getPreviousNamedSibling() const
+        {
+            return Node{ ts_node_prev_named_sibling(impl) };
+        }
+
+        [[nodiscard]] Node getNextNamedSibling() const
+        {
+            return Node{ ts_node_next_named_sibling(impl) };
+        }
 
         [[nodiscard]] uint32_t getNumNamedChildren() const
         {
@@ -294,11 +329,31 @@ namespace ts
             return Node{ ts_node_named_child(impl, position) };
         }
 
+        [[nodiscard]] Node getFirstNamedChildForByte(uint32_t byte) const
+        {
+            return Node{ ts_node_first_named_child_for_byte(impl, byte) };
+        }
+
+        [[nodiscard]] Node getNamedDescendantForByteRange(Extent<uint32_t> range) const
+        {
+            return Node{ ts_node_named_descendant_for_byte_range(impl, range.start, range.end) };
+        }
+
+        [[nodiscard]] Node getNamedDescendantForPointRange(Extent<Point> range) const
+        {
+            return Node{ ts_node_named_descendant_for_point_range(impl, range.start, range.end) };
+        }
+
         // Named fields
 
         [[nodiscard]] std::string_view getFieldNameForChild(uint32_t child_position) const
         {
             return ts_node_field_name_for_child(impl, child_position);
+        }
+
+        [[nodiscard]] std::string_view getFieldNameForNamedChild(uint32_t named_child_index) const
+        {
+            return ts_node_field_name_for_named_child(impl, child_position);
         }
 
         [[nodiscard]] Node getChildByFieldName(std::string_view name) const
@@ -353,8 +408,32 @@ namespace ts
 
         [[nodiscard]] std::string_view getSourceRange(std::string_view source) const
         {
+            if (this->isNull())
+            {
+                return {};
+            }
+
             Extent<uint32_t> extents = getByteRange();
+            if (extents.end > source.size())
+            {
+                return "";
+            }
             return source.substr(extents.start, extents.end - extents.start);
+        }
+
+        [[nodiscard]] std::string getSourceText(std::string_view source) const
+        {
+            return std::string(getSourceRange(source));
+        }
+
+        [[nodiscard]] bool operator==(const Node &other) const
+        {
+            return ts_node_eq(impl, other.impl);
+        }
+
+        [[nodiscard]] bool operator!=(const Node &other) const
+        {
+            return !(*this == other);
         }
 
         TSNode impl;
