@@ -2,13 +2,14 @@
 #ifndef CPP_TREE_SITTER_HPP
 #define CPP_TREE_SITTER_HPP
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <vector>
 
 /////////////////////////////////////////////////////////////////////////////
@@ -33,6 +34,11 @@
 
 #if defined(TS_CXX_17) || defined(TS_CXX_20)
 #include <optional>
+#include <string_view>
+#endif
+
+#if !(defined(_WIN32) && !defined(__CYGWIN__))
+#include <cstdio>
 #endif
 
 #include <tree_sitter/api.h>
@@ -41,7 +47,7 @@ namespace ts
 {
 
     /////////////////////////////////////////////////////////////////////////////
-    // Helper classes
+    // Helper Classes & Structs
     // Internal utilities for memory management and range representation.
     /////////////////////////////////////////////////////////////////////////////
 
@@ -62,11 +68,88 @@ namespace ts
         T end;
     };
 
+#if !defined(TS_CXX_17) && !defined(TS_CXX_20)
+    class StringView
+    {
+    public:
+        constexpr StringView() noexcept : data_(nullptr), size_(0)
+        {}
+
+        constexpr StringView(const char *s, size_t count) : data_(s), size_(count)
+        {}
+
+        StringView(const char *s) : data_(s), size_(s ? std::strlen(s) : 0)
+        {}
+
+        StringView(const std::string &s) noexcept : data_(s.data()), size_(s.size())
+        {}
+
+        constexpr const char *data() const noexcept
+        {
+            return data_;
+        }
+        constexpr size_t size() const noexcept
+        {
+            return size_;
+        }
+        constexpr bool empty() const noexcept
+        {
+            return size_ == 0;
+        }
+
+        constexpr char operator[](size_t pos) const
+        {
+            return data_[pos];
+        }
+
+        constexpr const char *begin() const noexcept
+        {
+            return data_;
+        }
+        constexpr const char *end() const noexcept
+        {
+            return data_ + size_;
+        }
+
+        void remove_prefix(size_t n)
+        {
+            data_ += n;
+            size_ -= n;
+        }
+
+        void remove_suffix(size_t n)
+        {
+            size_ -= n;
+        }
+
+        explicit operator std::string() const
+        {
+            return std::string(data_, size_);
+        }
+
+    private:
+        const char *data_;
+        size_t      size_;
+    };
+#endif
+
     /////////////////////////////////////////////////////////////////////////////
     // Aliases.
     // Create slightly stricter aliases for some of the core tree-sitter types.
     /////////////////////////////////////////////////////////////////////////////
 
+    namespace details
+    {
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+        using StringViewParameter = const std::string_view;
+        using StringViewReturn    = std::string_view;
+
+        using ByteViewU8_t = const std::basic_string_view<uint8_t>;
+#else
+        using StringViewParameter = const std::string &;
+        using StringViewReturn    = StringView;
+#endif
+    } // namespace details
 
     // Direct alias of { row: uint32_t; column: uint32_t }
     using Point = TSPoint;
@@ -79,6 +162,12 @@ namespace ts
     using FieldID = uint16_t;
     using Version = uint32_t;
     using NodeID  = uintptr_t;
+
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+    using DecodeFunction = std::function<uint32_t(ByteViewU8_t, int32_t *)>;
+#else
+    using DecodeFunction = std::function<uint32_t(const uint8_t *, uint32_t, int32_t *)>;
+#endif
 
     /////////////////////////////////////////////////////////////////////////////
     // Enums.
@@ -129,6 +218,115 @@ namespace ts
         explicit Range(const TSRange &range)
             : point(range.start_point, range.end_point), byte(range.start_byte, range.end_byte)
         {}
+
+        operator TSRange() const
+        {
+            return { point.start, point.end, byte.start, byte.end };
+        }
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Input
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct Input
+    {
+        using ReadFunction = std::function<details::StringViewReturn(uint32_t, Point, uint32_t *)>;
+
+        ReadFunction       read;
+        InputEncoding      encoding;
+        ts::DecodeFunction decode;
+
+        static const char *read_proxy(void *payload, uint32_t byte_index, TSPoint position, uint32_t *bytes_read)
+        {
+            auto *self = static_cast<Input *>(payload);
+            if (self && self->read)
+            {
+                details::StringViewReturn result = self->read(byte_index, Point(position), bytes_read);
+                return result.data();
+            }
+            *bytes_read = 0;
+            return nullptr;
+        }
+
+        static thread_local const Input *current_input_ptr;
+
+        static uint32_t decode_proxy(const uint8_t *string, uint32_t length, int32_t *code_point)
+        {
+            if (current_input_ptr && current_input_ptr->decode)
+            {
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+                // basic_string_view<uint8_t>, int32_t *
+                return current_input_ptr->decode({ string, length }, code_point);
+#else
+                // const uint8_t*, uint32_t, int32_t *
+                return current_input_ptr->decode(string, length, code_point);
+#endif
+            }
+            return 0;
+        }
+
+        operator TSInput() const
+        {
+            TSInput c_input{};
+            c_input.payload  = const_cast<Input *>(this);
+            c_input.read     = read_proxy;
+            c_input.encoding = static_cast<TSInputEncoding>(encoding);
+            c_input.decode   = (decode) ? decode_proxy : nullptr;
+            return c_input;
+        }
+    };
+
+    inline thread_local const Input *Input::current_input_ptr = nullptr;
+
+    /////////////////////////////////////////////////////////////////////////////
+    // ParseState
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct ParseState
+    {
+        uint32_t current_byte_offset;
+        bool     has_error;
+
+        explicit ParseState(const TSParseState *state)
+            : current_byte_offset(state->current_byte_offset), has_error(state->has_error)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // ParseOptions
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct ParseOptions
+    {
+        using ProgressCallbackFunction = std::function<bool(ParseState *)>;
+
+        ProgressCallbackFunction progress_callback;
+
+        static bool progress_callback_proxy(TSParseState *state)
+        {
+            if (state && state->payload)
+            {
+                auto *self = static_cast<ParseOptions *>(state->payload);
+                if (self->progress_callback)
+                {
+                    ParseState cpp_state(state);
+                    return self->progress_callback(&cpp_state);
+                }
+            }
+            return false;
+        }
+
+        operator TSParseOptions() const
+        {
+            TSParseOptions options{};
+            options.payload           = const_cast<ParseOptions *>(this);
+            options.progress_callback = (progress_callback) ? progress_callback_proxy : nullptr;
+            return options;
+        }
     };
 
     /////////////////////////////////////////////////////////////////////////////
@@ -178,7 +376,7 @@ namespace ts
         // Symbol Resolution
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] std::string_view getSymbolName(Symbol symbol) const
+        [[nodiscard]] details::StringViewReturn getSymbolName(Symbol symbol) const
         {
             return ts_language_symbol_name(impl.get(), symbol);
         }
@@ -188,7 +386,7 @@ namespace ts
             return static_cast<SymbolType>(ts_language_symbol_type(impl.get(), symbol));
         }
 
-        [[nodiscard]] Symbol getSymbolForName(std::string_view name, bool isNamed) const
+        [[nodiscard]] Symbol getSymbolForName(details::StringViewParameter name, bool isNamed) const
         {
             return ts_language_symbol_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()), isNamed);
         }
@@ -197,12 +395,12 @@ namespace ts
         // Field Resolution
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] std::string_view getFieldNameForId(FieldID id) const
+        [[nodiscard]] details::StringViewReturn getFieldNameForId(FieldID id) const
         {
             return ts_language_field_name_for_id(impl.get(), id);
         }
 
-        [[nodiscard]] FieldID getFieldIdForName(std::string_view name) const
+        [[nodiscard]] FieldID getFieldIdForName(details::StringViewParameter name) const
         {
             return ts_language_field_id_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
@@ -215,7 +413,7 @@ namespace ts
         {
             uint32_t length = 0;
             Symbol  *array  = ts_language_supertypes(impl.get(), &length);
-            if (!array)
+            if (!array || length == 0)
             {
                 return {};
             }
@@ -230,7 +428,7 @@ namespace ts
         {
             uint32_t length = 0;
             Symbol  *array  = ts_language_subtypes(impl.get(), supertype, &length);
-            if (!array)
+            if (!array || length == 0)
             {
                 return {};
             }
@@ -254,7 +452,7 @@ namespace ts
         // Metadata
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] std::string_view getName() const
+        [[nodiscard]] details::StringViewReturn getName() const
         {
             return ts_language_name(impl.get());
         }
@@ -456,17 +654,17 @@ namespace ts
         // Fields
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] std::string_view getFieldNameForChild(uint32_t child_position) const
+        [[nodiscard]] details::StringViewReturn getFieldNameForChild(uint32_t child_position) const
         {
             return ts_node_field_name_for_child(impl, child_position);
         }
 
-        [[nodiscard]] std::string_view getFieldNameForNamedChild(uint32_t named_child_index) const
+        [[nodiscard]] details::StringViewReturn getFieldNameForNamedChild(uint32_t named_child_index) const
         {
             return ts_node_field_name_for_named_child(impl, child_position);
         }
 
-        [[nodiscard]] Node getChildByFieldName(std::string_view name) const
+        [[nodiscard]] Node getChildByFieldName(details::StringViewParameter name) const
         {
             return Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
         }
@@ -499,7 +697,7 @@ namespace ts
             return ts_node_symbol(impl);
         }
 
-        [[nodiscard]] std::string_view getType() const
+        [[nodiscard]] details::StringViewReturn getType() const
         {
             return ts_node_type(impl);
         }
@@ -523,7 +721,7 @@ namespace ts
         // Source Text Access
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] std::string_view getSourceRange(std::string_view source) const
+        [[nodiscard]] details::StringViewReturn getSourceRange(details::StringViewParameter source) const
         {
             if (this->isNull())
             {
@@ -538,7 +736,7 @@ namespace ts
             return source.substr(extents.start, extents.end - extents.start);
         }
 
-        [[nodiscard]] std::string getSourceText(std::string_view source) const
+        [[nodiscard]] std::string getSourceText(details::StringViewParameter source) const
         {
             return std::string(getSourceRange(source));
         }
@@ -611,6 +809,12 @@ namespace ts
     {
     public:
         ////////////////////////////////////////////////////////////////
+        // Aliases
+        ////////////////////////////////////////////////////////////////
+
+        using LoggerFunction = std::function<void(LogType, const char *)>;
+
+        ////////////////////////////////////////////////////////////////
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
@@ -631,23 +835,110 @@ namespace ts
             return ts_parser_set_language(impl.get(), language);
         }
 
+        [[nodiscard]] bool setIncludedRanges(const std::vector<Range> &ranges)
+        {
+            if (ranges.empty())
+            {
+                return ts_parser_set_included_ranges(impl.get(), nullptr, 0);
+            }
+
+            std::vector<TSRange> c_ranges;
+            c_ranges.reserve(ranges.size());
+            for (const auto &r : ranges)
+            {
+                c_ranges.push_back(static_cast<TSRange>(r));
+            }
+
+            std::sort(c_ranges.begin(),
+                      c_ranges.end(),
+                      [](const TSRange &a, const TSRange &b) { return a.start_byte < b.start_byte; });
+
+            std::vector<TSRange> merged;
+            merged.reserve(c_ranges.size());
+            merged.push_back(c_ranges[0]);
+
+            for (size_t i = 1; i < c_ranges.size(); ++i)
+            {
+                TSRange &last    = merged.back();
+                TSRange &current = c_ranges[i];
+
+                // If ranges overlap
+                if (current.start_byte <= last.end_byte)
+                {
+                    // Update end_byte (futher from two)
+                    if (current.end_byte > last.end_byte)
+                    {
+                        last.end_byte  = current.end_byte;
+                        last.end_point = current.end_point;
+                    }
+                }
+                else
+                {
+                    merged.push_back(current);
+                }
+            }
+
+            return ts_parser_set_included_ranges(impl.get(), merged.data(), static_cast<uint32_t>(merged.size()));
+        }
+
         [[nodiscard]] Language getCurrentLanguage() const
         {
             return Language{ ts_parser_language(impl.get()) };
+        }
+
+        [[nodiscard]] std::vector<Range> getIncludedRanges() const
+        {
+            uint32_t       length = 0;
+            const TSRange *array  = ts_parser_included_ranges(impl.get(), &length);
+            if (!array || length == 0)
+            {
+                return {};
+            }
+
+            std::vector<Range> vec;
+            vec.reserve(length);
+            for (uint32_t i = 0; i < length; ++i)
+            {
+                vec.emplace_back(array[i]);
+            }
+
+            return vec;
         }
 
         ////////////////////////////////////////////////////////////////
         // Parsing
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Tree parseString(std::string_view buffer)
+        [[nodiscard]] Tree parse(Input &input)
+        {
+            Input::current_input_ptr = &input;
+
+            TSTree *new_tree = ts_parser_parse(impl.get(), nullptr, input);
+
+            Input::current_input_ptr = nullptr;
+
+            return Tree(new_tree);
+        }
+
+        [[nodiscard]] Tree parseWithOptions(Input &input, const ParseOptions &parse_options)
+        {
+            Input::current_input_ptr = &input;
+
+            TSTree *new_tree = ts_parser_parse_with_options(impl.get(), nullptr, input, parse_options);
+
+            Input::current_input_ptr = nullptr;
+
+            return Tree(new_tree);
+        }
+
+        [[nodiscard]] Tree parseString(details::StringViewParameter buffer)
         {
             return Tree{
                 ts_parser_parse_string(impl.get(), nullptr, buffer.data(), static_cast<uint32_t>(buffer.size()))
             };
         }
 
-        [[nodiscard]] Tree parseStringEncoded(std::string_view buffer, InputEncoding encoding)
+        [[nodiscard]] Tree parseStringEncoded(details::StringViewParameter buffer, InputEncoding encoding)
         {
             return Tree{ ts_parser_parse_string_encoding(impl.get(),
                                                          nullptr,
@@ -657,10 +948,38 @@ namespace ts
         }
 
         ////////////////////////////////////////////////////////////////
+        // Debugging
+        ////////////////////////////////////////////////////////////////
+
+        void enableDotGraphs(int fd)
+        {
+            ts_parser_print_dot_graphs(impl.get(), fd);
+        }
+
+        void enableDotGraphs(FILE *file)
+        {
+            if (file)
+            {
+#if defined(_WIN32) && !defined(__CYGWIN__)
+                // On Windows we get descriptor using _fileno
+                enableDotGraphs(_fileno(file));
+#else
+                // On POSIX systems we use fileno z <cstdio>
+                enableDotGraphs(fileno(file));
+#endif
+            }
+        }
+
+        void disableDotGraphs()
+        {
+            enableDotGraphs(-1);
+        }
+
+        ////////////////////////////////////////////////////////////////
         // Logging
         ////////////////////////////////////////////////////////////////
 
-        void setLogger(std::function<void(LogType, const char *)> logger_func)
+        void setLogger(LoggerFunction logger_func)
         {
             current_logger = std::move(logger_func);
 
@@ -668,10 +987,13 @@ namespace ts
             ts_logger.payload = this;
             ts_logger.log     = [](void *payload, TSLogType log_type, const char *buffer)
             {
-                auto *self = static_cast<Parser *>(payload);
-                if (self->current_logger)
+                if (payload)
                 {
-                    self->current_logger(static_cast<LogType>(log_type), buffer);
+                    auto *self = static_cast<Parser *>(payload);
+                    if (self->current_logger)
+                    {
+                        self->current_logger(static_cast<LogType>(log_type), buffer);
+                    }
                 }
             };
 
@@ -823,7 +1145,7 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        Query(Language language, std::string_view source)
+        Query(Language language, details::StringViewParameter source)
         {
             uint32_t     error_offset;
             TSQueryError error_type;
@@ -919,7 +1241,7 @@ namespace ts
         // Capture Resolution
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] std::string_view getCaptureNameForId(uint32_t id) const
+        [[nodiscard]] details::StringViewReturn getCaptureNameForId(uint32_t id) const
         {
             uint32_t    length;
             const char *name = ts_query_capture_name_for_id(impl.get(), id, &length);
@@ -932,7 +1254,7 @@ namespace ts
                     ts_query_capture_quantifier_for_id(impl.get(), pattern_index, capture_index));
         }
 
-        [[nodiscard]] std::string_view getStringValueForId(uint32_t id) const
+        [[nodiscard]] details::StringViewReturn getStringValueForId(uint32_t id) const
         {
             uint32_t    length;
             const char *name = ts_query_string_value_for_id(impl.get(), id, &length);
@@ -943,7 +1265,7 @@ namespace ts
         // Modification
         ////////////////////////////////////////////////////////////////
 
-        void disableCapture(std::string_view name) const
+        void disableCapture(details::StringViewParameter name) const
         {
             ts_query_disable_capture(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
