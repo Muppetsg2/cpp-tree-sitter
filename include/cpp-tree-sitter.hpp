@@ -60,6 +60,7 @@ namespace ts
     struct InputEdit;
     struct Node;
     class TreeCursor;
+    class LookaheadIterator;
 
     /////////////////////////////////////////////////////////////////////////////
     // Helper Classes & Structs
@@ -784,6 +785,8 @@ namespace ts
         {
             return ts_language_next_state(impl.get(), state, symbol);
         }
+
+        [[nodiscard]] LookaheadIterator getLookaheadIterator(StateID state) const;
 
         ////////////////////////////////////////////////////////////////
         // Metadata
@@ -2060,6 +2063,95 @@ namespace ts
     private:
         std::unique_ptr<TSQueryCursor, decltype(&ts_query_cursor_delete)> impl;
     };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // LookaheadIterator
+    // Iterates over possible symbols in a given parse state.
+    /////////////////////////////////////////////////////////////////////////////
+
+    class LookaheadIterator
+    {
+    public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
+        LookaheadIterator(Language language, StateID state)
+            : impl{ ts_lookahead_iterator_new(language, state), ts_lookahead_iterator_delete }
+        {
+            if (!impl)
+            {
+                throw std::runtime_error("Tree-sitter: Invalid parse state for lookahead iterator");
+            }
+        }
+
+        // Copying is not supported by the underlying C API.
+        LookaheadIterator(const LookaheadIterator &)            = delete;
+        LookaheadIterator &operator=(const LookaheadIterator &) = delete;
+
+        LookaheadIterator(LookaheadIterator &&other) noexcept            = default;
+        LookaheadIterator &operator=(LookaheadIterator &&other) noexcept = default;
+
+        ////////////////////////////////////////////////////////////////
+        // State Control
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] bool resetState(StateID state)
+        {
+            return ts_lookahead_iterator_reset_state(impl.get(), state);
+        }
+
+        [[nodiscard]] bool reset(Language language, StateID state)
+        {
+            return ts_lookahead_iterator_reset(impl.get(), language, state);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Property Accessors
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] Language getLanguage() const
+        {
+            return Language{ ts_lookahead_iterator_language(impl.get()) };
+        }
+
+        [[nodiscard]] Symbol getCurrentSymbol() const
+        {
+            return ts_lookahead_iterator_current_symbol(impl.get());
+        }
+
+        [[nodiscard]] details::StringViewReturn getCurrentSymbolName() const
+        {
+            const char *name = ts_lookahead_iterator_current_symbol_name(impl.get());
+            return name ? details::StringViewReturn(name) : details::StringViewReturn("");
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Navigation
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] bool next()
+        {
+            return ts_lookahead_iterator_next(impl.get());
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] operator const TSLookaheadIterator *() const
+        {
+            return impl.get();
+        }
+
+    private:
+        std::unique_ptr<TSLookaheadIterator, decltype(&ts_lookahead_iterator_delete)> impl;
+    };
+
+    [[nodiscard]] inline LookaheadIterator Language::getLookaheadIterator(StateID state) const
+    {
+        return LookaheadIterator(impl.get(), state);
+    }
 
     /////////////////////////////////////////////////////////////////////////////
     // Child Node Iterators
