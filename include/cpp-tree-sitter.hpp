@@ -39,6 +39,7 @@
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
 // On Windows we get descriptor using _fileno
+#include <io.h>
 #define TS_FILENO _fileno
 #else
 // On POSIX systems we use fileno z <cstdio>
@@ -50,6 +51,14 @@
 
 namespace ts
 {
+    /////////////////////////////////////////////////////////////////////////////
+    // Forward Declarations
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct Point;
+    struct InputEdit;
+    struct Node;
+    class TreeCursor;
 
     /////////////////////////////////////////////////////////////////////////////
     // Helper Classes & Structs
@@ -77,6 +86,10 @@ namespace ts
     class StringView
     {
     public:
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         constexpr StringView() noexcept : data_(nullptr), size_(0)
         {}
 
@@ -89,10 +102,28 @@ namespace ts
         StringView(const std::string &s) noexcept : data_(s.data()), size_(s.size())
         {}
 
+        ////////////////////////////////////////////////////////////////
+        // Data
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] constexpr const char *data() const noexcept
         {
             return data_;
         }
+
+        [[nodiscard]] constexpr const char *begin() const noexcept
+        {
+            return data_;
+        }
+
+        [[nodiscard]] constexpr const char *end() const noexcept
+        {
+            return data_ + size_;
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Size
+        ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] constexpr size_t size() const noexcept
         {
@@ -104,29 +135,22 @@ namespace ts
             return size_ == 0;
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Manipulation
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] StringView substr(size_t pos, size_t n) const
+        {
+            return { data_ + pos, n };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] constexpr char operator[](size_t pos) const
         {
             return data_[pos];
-        }
-
-        [[nodiscard]] constexpr const char *begin() const noexcept
-        {
-            return data_;
-        }
-        [[nodiscard]] constexpr const char *end() const noexcept
-        {
-            return data_ + size_;
-        }
-
-        void remove_prefix(size_t n)
-        {
-            data_ += n;
-            size_ -= n;
-        }
-
-        void remove_suffix(size_t n)
-        {
-            size_ -= n;
         }
 
         explicit operator std::string() const
@@ -145,13 +169,21 @@ namespace ts
     // Create slightly stricter aliases for some of the core tree-sitter types.
     /////////////////////////////////////////////////////////////////////////////
 
+    // Direct alias of { major_version: uint8_t; minor_version: uint8_t; patch_version: uint8_t }
+    using LanguageMetadata = TSLanguageMetadata;
+
+    using StateID = uint16_t;
+    using Symbol  = uint16_t;
+    using FieldID = uint16_t;
+    using Version = uint32_t;
+    using NodeID  = uintptr_t;
+
     namespace details
     {
 #if defined(TS_CXX_17) || defined(TS_CXX_20)
         using StringViewParameter = const std::string_view;
         using StringViewReturn    = std::string_view;
-
-        using ByteViewU8_t = const std::basic_string_view<uint8_t>;
+        using ByteViewU8_t        = const std::basic_string_view<uint8_t>;
 
         template <typename T>
         using OptionalParam = std::optional<std::reference_wrapper<T>>;
@@ -159,7 +191,7 @@ namespace ts
         template <typename T, typename Raw>
         [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
         {
-            return opt.has_value() ? static_cast<Raw *>(opt->get()) : nullptr;
+            return opt.has_value() ? static_cast<Raw *>(static_cast<void *>(&opt->get())) : nullptr;
         }
 #else
         using StringViewParameter = const std::string &;
@@ -171,29 +203,13 @@ namespace ts
         template <typename T, typename Raw>
         [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
         {
-            return opt ? static_cast<Raw *>(*opt) : nullptr;
+            return opt ? static_cast<Raw *>(static_cast<void *>(opt)) : nullptr;
         }
 #endif
     } // namespace details
 
-    // Direct alias of { row: uint32_t; column: uint32_t }
-    using Point = TSPoint;
-
-    // Direct alias of { start_byte: uint32_t; old_end_byte: uint32_t, new_end_byte: uint32_t, start_point: Point,
-    // old_end_point: Point, new_end_point: Point }
-    using InputEdit = TSInputEdit;
-
-    // Direct alias of { major_version: uint8_t; minor_version: uint8_t; patch_version: uint8_t }
-    using LanguageMetadata = TSLanguageMetadata;
-
-    using StateID = uint16_t;
-    using Symbol  = uint16_t;
-    using FieldID = uint16_t;
-    using Version = uint32_t;
-    using NodeID  = uintptr_t;
-
 #if defined(TS_CXX_17) || defined(TS_CXX_20)
-    using DecodeFunction = std::function<uint32_t(ByteViewU8_t, int32_t *)>;
+    using DecodeFunction = std::function<uint32_t(details::ByteViewU8_t, int32_t *)>;
 #else
     using DecodeFunction = std::function<uint32_t(const uint8_t *, uint32_t, int32_t *)>;
 #endif
@@ -235,6 +251,143 @@ namespace ts
     };
 
     /////////////////////////////////////////////////////////////////////////////
+    // Point
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct Point
+    {
+        uint32_t row;
+        uint32_t column;
+
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
+        Point(const TSPoint &other) : row(other.row), column(other.column)
+        {}
+
+        ////////////////////////////////////////////////////////////////
+        // Manipulation
+        ////////////////////////////////////////////////////////////////
+
+        // Definition deferred until after the definition of InputEdit.
+        void edit(const InputEdit &edit, uint32_t &byte_offset);
+
+        ////////////////////////////////////////////////////////////////
+        // Comparision
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] bool operator==(const Point &other) const
+        {
+            return row == other.row && column == other.column;
+        }
+
+        [[nodiscard]] bool operator!=(const Point &other) const
+        {
+            return !(*this == other);
+        }
+
+        [[nodiscard]] bool operator>(const Point &other) const
+        {
+            return (row > other.row) || (row == other.row && column > other.column);
+        }
+
+        [[nodiscard]] bool operator<=(const Point &other) const
+        {
+            return !(*this > other);
+        }
+
+        [[nodiscard]] bool operator<(const Point &other) const
+        {
+            return (row < other.row) || (row == other.row && column < other.column);
+        }
+
+        [[nodiscard]] bool operator>=(const Point &other) const
+        {
+            return !(*this < other);
+        }
+
+        [[nodiscard]] static void is_valid_range(const Point &start, const Point &end)
+        {
+            return start <= end;
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        operator TSPoint() const
+        {
+            return { row, column };
+        }
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // InputEdit
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct InputEdit
+    {
+        uint32_t start_byte;
+        uint32_t old_end_byte;
+        uint32_t new_end_byte;
+        Point    start_point;
+        Point    old_end_point;
+        Point    new_end_point;
+
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
+        explicit InputEdit(const TSInputEdit &edit)
+            : start_byte(edit.start_byte)
+            , old_end_byte(edit.old_end_byte)
+            , new_end_byte(edit.new_end_byte)
+            , start_point(edit.start_point)
+            , old_end_point(edit.old_end_point)
+            , new_end_point(edit.new_end_point)
+        {}
+
+        ////////////////////////////////////////////////////////////////
+        // Validation
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] void validate() const
+        {
+            bool bytes_invalid = start_byte > old_end_byte;
+
+            bool points_invalid = Point::is_valid_range(start_point, old_end_point);
+
+            if (bytes_invalid || points_invalid)
+            {
+                throw std::invalid_argument("Tree-sitter: Invalid edit ranges (start > old_end)");
+            }
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        operator TSInputEdit() const
+        {
+            return { start_byte, old_end_byte, new_end_byte, start_point, old_end_point, new_end_point };
+        }
+    };
+
+    inline void Point::edit(const InputEdit &edit, uint32_t &byte_offset)
+    {
+        edit.validate();
+
+        TSPoint raw_point = static_cast<TSPoint>(*this);
+        ts_point_edit(&raw_point, &byte_offset, &edit);
+
+        row    = raw_point.row;
+        column = raw_point.column;
+    }
+
+    /////////////////////////////////////////////////////////////////////////////
     // Range
     // Representation of a range within the source code using points and bytes.
     /////////////////////////////////////////////////////////////////////////////
@@ -244,9 +397,35 @@ namespace ts
         Extent<Point>    point;
         Extent<uint32_t> byte;
 
+        ////////////////////////////////////////////////////////////////
+        // Lifecycle
+        ////////////////////////////////////////////////////////////////
+
         explicit Range(const TSRange &range)
             : point(range.start_point, range.end_point), byte(range.start_byte, range.end_byte)
         {}
+
+        ////////////////////////////////////////////////////////////////
+        // Manipulation
+        ////////////////////////////////////////////////////////////////
+
+        void edit(const InputEdit &edit)
+        {
+            edit.validate(edit);
+
+            TSRange raw_range = static_cast<TSRange>(*this);
+
+            ts_range_edit(&raw_range, &edit);
+
+            point.start = raw_range.start_point;
+            point.end   = raw_range.end_point;
+            byte.start  = raw_range.start_byte;
+            byte.end    = raw_range.end_byte;
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
 
         operator TSRange() const
         {
@@ -267,19 +446,23 @@ namespace ts
         InputEncoding      encoding;
         ts::DecodeFunction decode;
 
+        static thread_local const Input *current_input_ptr;
+
+        ////////////////////////////////////////////////////////////////
+        // Static Functions
+        ////////////////////////////////////////////////////////////////
+
         static const char *read_proxy(void *payload, uint32_t byte_index, TSPoint position, uint32_t *bytes_read)
         {
             auto *self = static_cast<Input *>(payload);
             if (self && self->read)
             {
-                details::StringViewReturn result = self->read(byte_index, Point(position), bytes_read);
+                details::StringViewReturn result = self->read(byte_index, position, bytes_read);
                 return result.data();
             }
             *bytes_read = 0;
             return nullptr;
         }
-
-        static thread_local const Input *current_input_ptr;
 
         static uint32_t decode_proxy(const uint8_t *string, uint32_t length, int32_t *code_point)
         {
@@ -295,6 +478,10 @@ namespace ts
             }
             return 0;
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
 
         operator TSInput() const
         {
@@ -383,20 +570,20 @@ namespace ts
         Language(Language &&other) noexcept = default;
 
         ////////////////////////////////////////////////////////////////
-        // Num Accessors
+        // Count Accessors
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] size_t getNumSymbols() const
+        [[nodiscard]] size_t getSymbolsCount() const
         {
             return ts_language_symbol_count(impl.get());
         }
 
-        [[nodiscard]] size_t getNumStates() const
+        [[nodiscard]] size_t getStatesCount() const
         {
             return ts_language_state_count(impl.get());
         }
 
-        [[nodiscard]] size_t getNumFields() const
+        [[nodiscard]] size_t getFieldsCount() const
         {
             return ts_language_field_count(impl.get());
         }
@@ -424,12 +611,12 @@ namespace ts
         // Field Resolution
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] details::StringViewReturn getFieldNameForId(FieldID id) const
+        [[nodiscard]] details::StringViewReturn getFieldNameForID(FieldID id) const
         {
             return ts_language_field_name_for_id(impl.get(), id);
         }
 
-        [[nodiscard]] FieldID getFieldIdForName(details::StringViewParameter name) const
+        [[nodiscard]] FieldID getFieldIDForName(details::StringViewParameter name) const
         {
             return ts_language_field_id_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
@@ -495,7 +682,8 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getName() const
         {
-            return ts_language_name(impl.get());
+            const char *name = ts_language_name(impl.get());
+            return name ? details::StringViewReturn(name) : details::StringViewReturn("");
         }
 
         [[nodiscard]] Version getVersion() const
@@ -547,8 +735,6 @@ namespace ts
     // A single node in a parse tree, providing navigation and attributes.
     /////////////////////////////////////////////////////////////////////////////
 
-    class TreeCursor;
-
     struct Node
     {
         ////////////////////////////////////////////////////////////////
@@ -557,6 +743,41 @@ namespace ts
 
         explicit Node(TSNode node) : impl{ node }
         {}
+
+        ////////////////////////////////////////////////////////////////
+        // Identification & Type
+        ////////////////////////////////////////////////////////////////
+
+        // Returns a unique identifier for a node in a parse tree.
+        [[nodiscard]] NodeID getID() const
+        {
+            return reinterpret_cast<NodeID>(impl.id);
+        }
+
+        [[nodiscard]] details::StringViewReturn getType() const
+        {
+            return ts_node_type(impl);
+        }
+
+        [[nodiscard]] Symbol getSymbol() const
+        {
+            return ts_node_symbol(impl);
+        }
+
+        [[nodiscard]] details::StringViewReturn getGrammarType() const
+        {
+            return ts_node_grammar_type(impl);
+        }
+
+        [[nodiscard]] Symbol getGrammarSymbol() const
+        {
+            return ts_node_grammar_symbol(impl);
+        }
+
+        [[nodiscard]] Language getLanguage() const
+        {
+            return Language{ ts_node_language(impl) };
+        }
 
         ////////////////////////////////////////////////////////////////
         // Flag Checks
@@ -582,171 +803,24 @@ namespace ts
             return ts_node_is_extra(impl);
         }
 
-        [[nodiscard]] bool hasError() const
-        {
-            return ts_node_has_error(impl);
-        }
-
         [[nodiscard]] bool isError() const
         {
             return ts_node_is_error(impl);
         }
 
-        ////////////////////////////////////////////////////////////////
-        // Navigation (Direct)
-        ////////////////////////////////////////////////////////////////
-
-        // Direct parent/sibling/child connections and cursors
-
-        [[nodiscard]] Node getParent() const
+        [[nodiscard]] bool hasError() const
         {
-            return Node{ ts_node_parent(impl) };
+            return ts_node_has_error(impl);
         }
 
-        [[nodiscard]] Node getPreviousSibling() const
+        [[nodiscard]] bool hasChanges() const
         {
-            return Node{ ts_node_prev_sibling(impl) };
-        }
-
-        [[nodiscard]] Node getNextSibling() const
-        {
-            return Node{ ts_node_next_sibling(impl) };
-        }
-
-        [[nodiscard]] uint32_t getNumChildren() const
-        {
-            return ts_node_child_count(impl);
-        }
-
-        [[nodiscard]] Node getChild(uint32_t position) const
-        {
-            return Node{ ts_node_child(impl, position) };
-        }
-
-        [[nodiscard]] Node getChildWithDescendant(Node descendant) const
-        {
-            return Node{ ts_node_child_with_descendant(impl, descendant.impl) };
+            return ts_node_has_changes(impl);
         }
 
         ////////////////////////////////////////////////////////////////
-        // Navigation (Range-based)
+        // Ranges
         ////////////////////////////////////////////////////////////////
-
-        [[nodiscard]] Node getFirstChildForByte(uint32_t byte) const
-        {
-            return Node{ ts_node_first_child_for_byte(impl, byte) };
-        }
-
-        [[nodiscard]] uint32_t getNumDescendants() const
-        {
-            return ts_node_descendant_count(impl);
-        }
-
-        [[nodiscard]] Node getDescendantForByteRange(Extent<uint32_t> range) const
-        {
-            return Node{ ts_node_descendant_for_byte_range(impl, range.start, range.end) };
-        }
-
-        [[nodiscard]] Node getDescendantForPointRange(Extent<Point> range) const
-        {
-            return Node{ ts_node_descendant_for_point_range(impl, range.start, range.end) };
-        }
-
-        ////////////////////////////////////////////////////////////////
-        // Named Children
-        ////////////////////////////////////////////////////////////////
-
-        [[nodiscard]] Node getPreviousNamedSibling() const
-        {
-            return Node{ ts_node_prev_named_sibling(impl) };
-        }
-
-        [[nodiscard]] Node getNextNamedSibling() const
-        {
-            return Node{ ts_node_next_named_sibling(impl) };
-        }
-
-        [[nodiscard]] uint32_t getNumNamedChildren() const
-        {
-            return ts_node_named_child_count(impl);
-        }
-
-        [[nodiscard]] Node getNamedChild(uint32_t position) const
-        {
-            return Node{ ts_node_named_child(impl, position) };
-        }
-
-        [[nodiscard]] Node getFirstNamedChildForByte(uint32_t byte) const
-        {
-            return Node{ ts_node_first_named_child_for_byte(impl, byte) };
-        }
-
-        [[nodiscard]] Node getNamedDescendantForByteRange(Extent<uint32_t> range) const
-        {
-            return Node{ ts_node_named_descendant_for_byte_range(impl, range.start, range.end) };
-        }
-
-        [[nodiscard]] Node getNamedDescendantForPointRange(Extent<Point> range) const
-        {
-            return Node{ ts_node_named_descendant_for_point_range(impl, range.start, range.end) };
-        }
-
-        ////////////////////////////////////////////////////////////////
-        // Fields
-        ////////////////////////////////////////////////////////////////
-
-        [[nodiscard]] details::StringViewReturn getFieldNameForChild(uint32_t child_position) const
-        {
-            return ts_node_field_name_for_child(impl, child_position);
-        }
-
-        [[nodiscard]] details::StringViewReturn getFieldNameForNamedChild(uint32_t named_child_index) const
-        {
-            return ts_node_field_name_for_named_child(impl, child_position);
-        }
-
-        [[nodiscard]] Node getChildByFieldName(details::StringViewParameter name) const
-        {
-            return Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
-        }
-
-        ////////////////////////////////////////////////////////////////
-        // Cursor Creation
-        ////////////////////////////////////////////////////////////////
-
-        // Definition deferred until after the definition of TreeCursor.
-        [[nodiscard]] TreeCursor getCursor() const;
-
-        ////////////////////////////////////////////////////////////////
-        // Attributes
-        ////////////////////////////////////////////////////////////////
-
-        // Returns a unique identifier for a node in a parse tree.
-        [[nodiscard]] NodeID getID() const
-        {
-            return reinterpret_cast<NodeID>(impl.id);
-        }
-
-        // Returns an S-Expression representation of the subtree rooted at this node.
-        [[nodiscard]] std::unique_ptr<char, FreeHelper> getSExpr() const
-        {
-            return std::unique_ptr<char, FreeHelper>{ ts_node_string(impl) };
-        }
-
-        [[nodiscard]] Symbol getSymbol() const
-        {
-            return ts_node_symbol(impl);
-        }
-
-        [[nodiscard]] details::StringViewReturn getType() const
-        {
-            return ts_node_type(impl);
-        }
-
-        [[nodiscard]] Language getLanguage() const
-        {
-            return Language{ ts_node_language(impl) };
-        }
 
         [[nodiscard]] Extent<uint32_t> getByteRange() const
         {
@@ -781,6 +855,199 @@ namespace ts
         {
             return std::string(getSourceRange(source));
         }
+
+        // Returns an S-Expression representation of the subtree rooted at this node.
+        [[nodiscard]] std::unique_ptr<char, FreeHelper> getSExpr() const
+        {
+            return std::unique_ptr<char, FreeHelper>{ ts_node_string(impl) };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Navigation (General)
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] Node getParent() const
+        {
+            return Node{ ts_node_parent(impl) };
+        }
+
+        [[nodiscard]] Node getNextSibling() const
+        {
+            return Node{ ts_node_next_sibling(impl) };
+        }
+
+        [[nodiscard]] Node getPreviousSibling() const
+        {
+            return Node{ ts_node_prev_sibling(impl) };
+        }
+
+        [[nodiscard]] uint32_t getChildCount() const
+        {
+            return ts_node_child_count(impl);
+        }
+
+        [[nodiscard]] Node getChild(uint32_t child_index) const
+        {
+            if (child_index >= getChildCount())
+            {
+                throw std::out_of_range("Tree-sitter: Child index out of bounds");
+            }
+
+            return Node{ ts_node_child(impl, child_index) };
+        }
+
+        [[nodiscard]] Node getFirstChild() const
+        {
+            return getChild(0);
+        }
+
+        [[nodiscard]] Node getLastChild() const
+        {
+            uint32_t count = getChildCount();
+
+            return getChild(length > 0 ? length - 1 : length);
+        }
+
+        [[nodiscard]] Node getChildWithDescendant(Node descendant) const
+        {
+            return Node{ ts_node_child_with_descendant(impl, descendant.impl) };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Navigation (Named Children)
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] Node getNextNamedSibling() const
+        {
+            return Node{ ts_node_next_named_sibling(impl) };
+        }
+
+        [[nodiscard]] Node getPreviousNamedSibling() const
+        {
+            return Node{ ts_node_prev_named_sibling(impl) };
+        }
+
+        [[nodiscard]] uint32_t getNamedChildCount() const
+        {
+            return ts_node_named_child_count(impl);
+        }
+
+        [[nodiscard]] Node getNamedChild(uint32_t child_index) const
+        {
+            if (child_index >= getNamedChildCount())
+            {
+                throw std::out_of_range("Tree-sitter: Named Child index out of bounds");
+            }
+
+            return Node{ ts_node_named_child(impl, child_index) };
+        }
+
+        [[nodiscard]] Node getFirstNamedChild() const
+        {
+            return getNamedChild(0);
+        }
+
+        [[nodiscard]] Node getLastNamedChild() const
+        {
+            uint32_t length = getNamedChildCount();
+
+            return getNamedChild(length > 0 ? length - 1 : length);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Search & Descendants
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] uint32_t getDescendantsCount() const
+        {
+            return ts_node_descendant_count(impl);
+        }
+
+        [[nodiscard]] Node getFirstChildForByte(uint32_t byte) const
+        {
+            return Node{ ts_node_first_child_for_byte(impl, byte) };
+        }
+
+        [[nodiscard]] Node getFirstNamedChildForByte(uint32_t byte) const
+        {
+            return Node{ ts_node_first_named_child_for_byte(impl, byte) };
+        }
+
+        [[nodiscard]] Node getDescendantForByteRange(Extent<uint32_t> range) const
+        {
+            return Node{ ts_node_descendant_for_byte_range(impl, range.start, range.end) };
+        }
+
+        [[nodiscard]] Node getNamedDescendantForByteRange(Extent<uint32_t> range) const
+        {
+            return Node{ ts_node_named_descendant_for_byte_range(impl, range.start, range.end) };
+        }
+
+        [[nodiscard]] Node getDescendantForPointRange(Extent<Point> range) const
+        {
+            return Node{ ts_node_descendant_for_point_range(impl, range.start, range.end) };
+        }
+
+        [[nodiscard]] Node getNamedDescendantForPointRange(Extent<Point> range) const
+        {
+            return Node{ ts_node_named_descendant_for_point_range(impl, range.start, range.end) };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Fields
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] details::StringViewReturn getFieldNameForChild(uint32_t child_position) const
+        {
+            return ts_node_field_name_for_child(impl, child_position);
+        }
+
+        [[nodiscard]] details::StringViewReturn getFieldNameForNamedChild(uint32_t named_child_index) const
+        {
+            return ts_node_field_name_for_named_child(impl, child_position);
+        }
+
+        [[nodiscard]] Node getChildByFieldName(details::StringViewParameter name) const
+        {
+            return Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
+        }
+
+        [[nodiscard]] Node getChildByFieldID(FieldID field_id) const
+        {
+            return Node{ ts_node_child_by_field_id(impl, field_id) };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Parsing State
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] StateID getParseState() const
+        {
+            return ts_node_parse_state(impl);
+        }
+
+        [[nodiscard]] StateID getNextParseState() const
+        {
+            return ts_node_next_parse_state(impl);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Mutations
+        ////////////////////////////////////////////////////////////////
+
+        void edit(const InputEdit &edit)
+        {
+            edit.validate(edit);
+
+            ts_node_edit(impl, &edit);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Cursor
+        ////////////////////////////////////////////////////////////////
+
+        // Definition deferred until after the definition of TreeCursor.
+        [[nodiscard]] TreeCursor getCursor() const;
 
         ////////////////////////////////////////////////////////////////
         // Comparison
@@ -844,10 +1111,7 @@ namespace ts
 
         void edit(const InputEdit &edit)
         {
-            if (edit.start_byte > edit.old_end_byte || edit.start_point > edit.old_end_point)
-            {
-                throw std::invalid_argument("Tree-sitter: Invalid edit ranges (start > old_end)");
-            }
+            edit.validate(edit);
 
             ts_tree_edit(impl.get(), &edit);
         }
@@ -1260,11 +1524,6 @@ namespace ts
             return TreeCursor(impl);
         }
 
-        [[nodiscard]] Node getCurrentNode() const
-        {
-            return Node{ ts_tree_cursor_current_node(&impl) };
-        }
-
         ////////////////////////////////////////////////////////////////
         // Navigation
         ////////////////////////////////////////////////////////////////
@@ -1272,16 +1531,6 @@ namespace ts
         [[nodiscard]] bool gotoParent()
         {
             return ts_tree_cursor_goto_parent(&impl);
-        }
-
-        [[nodiscard]] bool gotoNextSibling()
-        {
-            return ts_tree_cursor_goto_next_sibling(&impl);
-        }
-
-        [[nodiscard]] bool gotoPreviousSibling()
-        {
-            return ts_tree_cursor_goto_previous_sibling(&impl);
         }
 
         [[nodiscard]] bool gotoFirstChild()
@@ -1294,7 +1543,57 @@ namespace ts
             return ts_tree_cursor_goto_last_child(&impl);
         }
 
-        [[nodiscard]] size_t getDepthFromOrigin() const
+        [[nodiscard]] bool gotoNextSibling()
+        {
+            return ts_tree_cursor_goto_next_sibling(&impl);
+        }
+
+        [[nodiscard]] bool gotoPreviousSibling()
+        {
+            return ts_tree_cursor_goto_previous_sibling(&impl);
+        }
+
+        [[nodiscard]] int64_t gotoFirstChildForByte(uint32_t byte)
+        {
+            return ts_tree_cursor_goto_first_child_for_byte(&impl, byte);
+        }
+
+        [[nodiscard]] int64_t gotoFirstChildForPoint(Point point)
+        {
+            return ts_tree_cursor_goto_first_child_for_point(&impl, point);
+        }
+
+        void gotoDescendant(uint32_t descendant_index)
+        {
+            ts_tree_cursor_goto_descendant(&impl, descendant_index);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Current Node Attributes
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] Node getCurrentNode() const
+        {
+            return Node{ ts_tree_cursor_current_node(&impl) };
+        }
+
+        [[nodiscard]] details::StringViewReturn getCurrentFieldName() const
+        {
+            const char *name = ts_tree_cursor_current_field_name(&impl);
+            return raw ? details::StringViewReturn(raw) : details::StringViewReturn("");
+        }
+
+        [[nodiscard]] FieldID getCurrentFieldID() const
+        {
+            return ts_tree_cursor_current_field_id(&impl);
+        }
+
+        [[nodiscard]] uint32_t getCurrentDescendantIndex() const
+        {
+            return ts_tree_cursor_current_descendant_index(&impl);
+        }
+
+        [[nodiscard]] uint32_t getDepthFromOrigin() const
         {
             return ts_tree_cursor_current_depth(&impl);
         }
@@ -1430,20 +1729,20 @@ namespace ts
         // Capture Resolution
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] details::StringViewReturn getCaptureNameForId(uint32_t id) const
+        [[nodiscard]] details::StringViewReturn getCaptureNameForID(uint32_t id) const
         {
             uint32_t    length;
             const char *name = ts_query_capture_name_for_id(impl.get(), id, &length);
             return { name, length };
         }
 
-        [[nodiscard]] Quantifier getCaptureQuantifierForId(uint32_t pattern_index, uint32_t capture_index) const
+        [[nodiscard]] Quantifier getCaptureQuantifierForID(uint32_t pattern_index, uint32_t capture_index) const
         {
             return static_cast<Quantifier>(
                     ts_query_capture_quantifier_for_id(impl.get(), pattern_index, capture_index));
         }
 
-        [[nodiscard]] details::StringViewReturn getStringValueForId(uint32_t id) const
+        [[nodiscard]] details::StringViewReturn getStringValueForID(uint32_t id) const
         {
             uint32_t    length;
             const char *name = ts_query_string_value_for_id(impl.get(), id, &length);
