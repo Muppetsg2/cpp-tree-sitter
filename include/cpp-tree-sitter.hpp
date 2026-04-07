@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iterator>
@@ -248,6 +249,13 @@ namespace ts
         ZeroOrMore = TSQuantifierZeroOrMore,
         One        = TSQuantifierOne,
         OneOrMore  = TSQuantifierOneOrMore,
+    };
+
+    enum class QueryPredicateStepType : uint8_t
+    {
+        Done    = TSQueryPredicateStepTypeDone,
+        Capture = TSQueryPredicateStepTypeCapture,
+        String  = TSQueryPredicateStepTypeString
     };
 
     /////////////////////////////////////////////////////////////////////////////
@@ -546,6 +554,107 @@ namespace ts
     };
 
     /////////////////////////////////////////////////////////////////////////////
+    // QueryCapture
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryCapture
+    {
+        Node     node;
+        uint32_t index;
+
+        // For easy conversion from C API
+        explicit QueryCapture(const TSQueryCapture &capture) : node(capture.node), index(capture.index)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryMatch
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryMatch
+    {
+        uint32_t id;
+        uint16_t pattern_index;
+
+        // A vector is used for easy access; however, note that data copying occurs only when the QueryMatch object is
+        // instantiated.
+        std::vector<QueryCapture> captures;
+
+        explicit QueryMatch(const TSQueryMatch &match) : id(match.id), pattern_index(match.pattern_index)
+        {
+            captures.reserve(match.capture_count);
+            for (uint32_t i = 0; i < match.capture_count; ++i)
+            {
+                captures.emplace_back(match.captures[i]);
+            }
+        }
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryCursorState
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryCursorState
+    {
+        uint32_t current_byte_offset;
+
+        explicit QueryCursorState(const TSQueryCursorState *state) : current_byte_offset(state->current_byte_offset)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryCursorOptions
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryCursorOptions
+    {
+        using ProgressCallbackFunction = std::function<bool(QueryCursorState *)>;
+
+        ProgressCallbackFunction progress_callback;
+
+        static bool progress_callback_proxy(TSQueryCursorState *state)
+        {
+            if (state && state->payload)
+            {
+                auto *self = static_cast<QueryCursorOptions *>(state->payload);
+                if (self->progress_callback)
+                {
+                    QueryCursorState cpp_state(state);
+                    return self->progress_callback(&cpp_state);
+                }
+            }
+            return false;
+        }
+
+        operator TSQueryCursorOptions() const
+        {
+            TSQueryCursorOptions options{};
+            options.payload           = const_cast<ParseOptions *>(this);
+            options.progress_callback = (progress_callback) ? progress_callback_proxy : nullptr;
+            return options;
+        }
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryPredicateStep
+    // ...
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryPredicateStep
+    {
+        QueryPredicateStepType type;
+        uint32_t               value_id;
+
+        explicit QueryPredicateStep(const TSQueryPredicateStep *predicate_step)
+            : type(static_cast<QueryPredicateStepType>(predicate_step->type)), value_id(predicate_step->value_id)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
     // Language
     // Represents a Tree-sitter grammar with metadata and symbol definitions.
     /////////////////////////////////////////////////////////////////////////////
@@ -627,20 +736,20 @@ namespace ts
 
         [[nodiscard]] std::vector<Symbol> getAllSuperTypes() const
         {
-            uint32_t length = 0;
-            Symbol  *array  = ts_language_supertypes(impl.get(), &length);
+            uint32_t count = 0;
+            Symbol  *array = ts_language_supertypes(impl.get(), &count);
             if (!array)
             {
                 return {};
             }
 
-            if (length == 0)
+            if (count == 0)
             {
                 std::free(array);
                 return {};
             }
 
-            std::vector<Symbol> vec(array, array + length);
+            std::vector<Symbol> vec(array, array + count);
             std::free(array);
 
             return vec;
@@ -648,20 +757,20 @@ namespace ts
 
         [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol supertype) const
         {
-            uint32_t length = 0;
-            Symbol  *array  = ts_language_subtypes(impl.get(), supertype, &length);
+            uint32_t count = 0;
+            Symbol  *array = ts_language_subtypes(impl.get(), supertype, &count);
             if (!array)
             {
                 return {};
             }
 
-            if (length == 0)
+            if (count == 0)
             {
                 std::free(array);
                 return {};
             }
 
-            std::vector<Symbol> vec(array, array + length);
+            std::vector<Symbol> vec(array, array + count);
             std::free(array);
 
             return vec;
@@ -905,7 +1014,7 @@ namespace ts
         {
             uint32_t count = getChildCount();
 
-            return getChild(length > 0 ? length - 1 : length);
+            return getChild(count > 0 ? count - 1 : count);
         }
 
         [[nodiscard]] Node getChildWithDescendant(Node descendant) const
@@ -949,9 +1058,9 @@ namespace ts
 
         [[nodiscard]] Node getLastNamedChild() const
         {
-            uint32_t length = getNamedChildCount();
+            uint32_t count = getNamedChildCount();
 
-            return getNamedChild(length > 0 ? length - 1 : length);
+            return getNamedChild(count > 0 ? count - 1 : count);
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1122,22 +1231,22 @@ namespace ts
 
         [[nodiscard]] std::vector<Range> getIncludedRanges() const
         {
-            uint32_t length = 0;
-            TSRange *array  = ts_tree_included_ranges(impl.get(), &length);
+            uint32_t count = 0;
+            TSRange *array = ts_tree_included_ranges(impl.get(), &count);
             if (!array)
             {
                 return {};
             }
 
-            if (length == 0)
+            if (count == 0)
             {
                 std::free(array);
                 return {};
             }
 
             std::vector<Range> vec;
-            vec.reserve(length);
-            for (uint32_t i = 0; i < length; ++i)
+            vec.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
             {
                 vec.emplace_back(array[i]);
             }
@@ -1148,24 +1257,24 @@ namespace ts
 
         [[nodiscard]] static std::vector<Range> getChangedRanges(const Tree &old_tree, const Tree &new_tree)
         {
-            uint32_t length = 0;
-            TSRange *array  = ts_tree_get_changed_ranges(static_cast<const TSTree *>(old_tree),
+            uint32_t count = 0;
+            TSRange *array = ts_tree_get_changed_ranges(static_cast<const TSTree *>(old_tree),
                                                         static_cast<const TSTree *>(new_tree),
-                                                        &length);
+                                                        &count);
             if (!array)
             {
                 return {};
             }
 
-            if (length == 0)
+            if (count == 0)
             {
                 std::free(array);
                 return {};
             }
 
             std::vector<Range> vec;
-            vec.reserve(length);
-            for (uint32_t i = 0; i < length; ++i)
+            vec.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
             {
                 vec.emplace_back(array[i]);
             }
@@ -1321,22 +1430,22 @@ namespace ts
 
         [[nodiscard]] std::vector<Range> getIncludedRanges() const
         {
-            uint32_t       length = 0;
-            const TSRange *array  = ts_parser_included_ranges(impl.get(), &length);
+            uint32_t       count = 0;
+            const TSRange *array = ts_parser_included_ranges(impl.get(), &count);
             if (!array)
             {
                 return {};
             }
 
-            if (length == 0)
+            if (count == 0)
             {
                 std::free(array);
                 return {};
             }
 
             std::vector<Range> vec;
-            vec.reserve(length);
-            for (uint32_t i = 0; i < length; ++i)
+            vec.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
             {
                 vec.emplace_back(array[i]);
             }
@@ -1691,6 +1800,25 @@ namespace ts
         }
 
         ////////////////////////////////////////////////////////////////
+        // Counts
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] uint32_t getPatternCount() const
+        {
+            return ts_query_pattern_count(impl.get());
+        }
+
+        [[nodiscard]] uint32_t getCaptureCount() const
+        {
+            return ts_query_capture_count(impl.get());
+        }
+
+        [[nodiscard]] uint32_t getStringCount() const
+        {
+            return ts_query_string_count(impl.get());
+        }
+
+        ////////////////////////////////////////////////////////////////
         // Pattern Information
         ////////////////////////////////////////////////////////////////
 
@@ -1704,19 +1832,9 @@ namespace ts
             return ts_query_is_pattern_non_local(impl.get(), pattern_index);
         }
 
-        [[nodiscard]] uint32_t getCaptureCount() const
+        [[nodiscard]] bool isPatternGuaranteedAtStep(uint32_t byte_offset) const
         {
-            return ts_query_capture_count(impl.get());
-        }
-
-        [[nodiscard]] uint32_t getPatternCount() const
-        {
-            return ts_query_pattern_count(impl.get());
-        }
-
-        [[nodiscard]] uint32_t getStringCount() const
-        {
-            return ts_query_string_count(impl.get());
+            return ts_query_is_pattern_guaranteed_at_step(impl.get(), byte_offset);
         }
 
         [[nodiscard]] Extent<uint32_t> getByteRangeForPattern(uint32_t pattern_index) const
@@ -1726,7 +1844,31 @@ namespace ts
         }
 
         ////////////////////////////////////////////////////////////////
-        // Capture Resolution
+        // Predicates
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] std::vector<QueryPredicateStep> getAllPredicatesForPattern(uint32_t pattern_index) const
+        {
+            uint32_t                    count = 0;
+            const TSQueryPredicateStep *array = ts_query_predicates_for_pattern(impl.get(), pattern_index, &count);
+
+            if (!array || count == 0)
+            {
+                return {};
+            }
+
+            std::vector<QueryPredicateStep> vec;
+            vec.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                vec.emplace_back(array[i]);
+            }
+
+            return vec;
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Capture & String Resolution
         ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] details::StringViewReturn getCaptureNameForID(uint32_t id) const
@@ -1777,40 +1919,6 @@ namespace ts
     };
 
     /////////////////////////////////////////////////////////////////////////////
-    // Query Results
-    // Structures representing matches and captures from a Query.
-    /////////////////////////////////////////////////////////////////////////////
-
-    struct QueryCapture
-    {
-        Node     node;
-        uint32_t index;
-
-        // For easy conversion from C API
-        explicit QueryCapture(const TSQueryCapture &capture) : node(capture.node), index(capture.index)
-        {}
-    };
-
-    struct QueryMatch
-    {
-        uint32_t id;
-        uint16_t pattern_index;
-
-        // A vector is used for easy access; however, note that data copying occurs only when the QueryMatch object is
-        // instantiated.
-        std::vector<QueryCapture> captures;
-
-        explicit QueryMatch(const TSQueryMatch &match) : id(match.id), pattern_index(match.pattern_index)
-        {
-            captures.reserve(match.capture_count);
-            for (uint32_t i = 0; i < match.capture_count; ++i)
-            {
-                captures.emplace_back(match.captures[i]);
-            }
-        }
-    };
-
-    /////////////////////////////////////////////////////////////////////////////
     // QueryCursor
     // Executes queries and iterates over matches.
     /////////////////////////////////////////////////////////////////////////////
@@ -1832,22 +1940,8 @@ namespace ts
         QueryCursor &operator=(QueryCursor &&)      = default;
 
         ////////////////////////////////////////////////////////////////
-        // Execution
-        ////////////////////////////////////////////////////////////////
-
-        void exec(const Query &query, Node node)
-        {
-            ts_query_cursor_exec(impl.get(), query, node.impl);
-        }
-
-        ////////////////////////////////////////////////////////////////
         // Limits
         ////////////////////////////////////////////////////////////////
-
-        [[nodiscard]] bool didExceedMatchLimit()
-        {
-            return ts_query_cursor_did_exceed_match_limit(impl.get());
-        }
 
         [[nodiscard]] uint32_t getMatchLimit()
         {
@@ -1859,13 +1953,23 @@ namespace ts
             ts_query_cursor_set_match_limit(impl.get(), limit);
         }
 
+        [[nodiscard]] bool didExceedMatchLimit()
+        {
+            return ts_query_cursor_did_exceed_match_limit(impl.get());
+        }
+
         void setMaxStartDepth(uint32_t max_start_depth)
         {
             ts_query_cursor_set_max_start_depth(impl.get(), max_start_depth);
         }
 
+        void resetMaxStartDepth()
+        {
+            ts_query_cursor_set_max_start_depth(impl.get(), UINT32_MAX);
+        }
+
         ////////////////////////////////////////////////////////////////
-        // Range Configuration
+        // Ranges
         ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] bool setByteRange(Extent<uint32_t> range)
@@ -1886,6 +1990,37 @@ namespace ts
         [[nodiscard]] bool setContainingPointRange(Extent<Point> range)
         {
             return ts_query_cursor_set_containing_point_range(impl.get(), range.start, range.end);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Execution
+        ////////////////////////////////////////////////////////////////
+
+        void exec(const Query &query, Node node, details::OptionalParam<const QueryCursorOptions> query_options)
+        {
+            const TSQueryCursorOptions *raw_options = nullptr;
+
+            TSQueryCursorOptions c_options;
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+            if (query_options.has_value())
+            {
+                c_options = static_cast<TSQueryCursorOptions>(query_options->get());
+#else
+            if (query_options)
+            {
+                c_options = static_cast<TSQueryCursorOptions>(*query_options);
+#endif
+                raw_options = &c_options;
+            }
+
+            if (raw_options)
+            {
+                ts_query_cursor_exec_with_options(impl.get(), query, node.impl, raw_options);
+            }
+            else
+            {
+                ts_query_cursor_exec(impl.get(), query, node.impl);
+            }
         }
 
         ////////////////////////////////////////////////////////////////
