@@ -37,8 +37,13 @@
 #include <string_view>
 #endif
 
-#if !(defined(_WIN32) && !defined(__CYGWIN__))
+#if defined(_WIN32) && !defined(__CYGWIN__)
+// On Windows we get descriptor using _fileno
+#define TS_FILENO _fileno
+#else
+// On POSIX systems we use fileno z <cstdio>
 #include <cstdio>
+#define TS_FILENO fileno
 #endif
 
 #include <tree_sitter/api.h>
@@ -84,29 +89,31 @@ namespace ts
         StringView(const std::string &s) noexcept : data_(s.data()), size_(s.size())
         {}
 
-        constexpr const char *data() const noexcept
+        [[nodiscard]] constexpr const char *data() const noexcept
         {
             return data_;
         }
-        constexpr size_t size() const noexcept
+
+        [[nodiscard]] constexpr size_t size() const noexcept
         {
             return size_;
         }
-        constexpr bool empty() const noexcept
+
+        [[nodiscard]] constexpr bool empty() const noexcept
         {
             return size_ == 0;
         }
 
-        constexpr char operator[](size_t pos) const
+        [[nodiscard]] constexpr char operator[](size_t pos) const
         {
             return data_[pos];
         }
 
-        constexpr const char *begin() const noexcept
+        [[nodiscard]] constexpr const char *begin() const noexcept
         {
             return data_;
         }
-        constexpr const char *end() const noexcept
+        [[nodiscard]] constexpr const char *end() const noexcept
         {
             return data_ + size_;
         }
@@ -145,14 +152,36 @@ namespace ts
         using StringViewReturn    = std::string_view;
 
         using ByteViewU8_t = const std::basic_string_view<uint8_t>;
+
+        template <typename T>
+        using OptionalParam = std::optional<std::reference_wrapper<T>>;
+
+        template <typename T, typename Raw>
+        [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
+        {
+            return opt.has_value() ? static_cast<Raw *>(opt->get()) : nullptr;
+        }
 #else
         using StringViewParameter = const std::string &;
         using StringViewReturn    = StringView;
+
+        template <typename T>
+        using OptionalParam = T *;
+
+        template <typename T, typename Raw>
+        [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
+        {
+            return opt ? static_cast<Raw *>(*opt) : nullptr;
+        }
 #endif
     } // namespace details
 
     // Direct alias of { row: uint32_t; column: uint32_t }
     using Point = TSPoint;
+
+    // Direct alias of { start_byte: uint32_t; old_end_byte: uint32_t, new_end_byte: uint32_t, start_point: Point,
+    // old_end_point: Point, new_end_point: Point }
+    using InputEdit = TSInputEdit;
 
     // Direct alias of { major_version: uint8_t; minor_version: uint8_t; patch_version: uint8_t }
     using LanguageMetadata = TSLanguageMetadata;
@@ -413,8 +442,14 @@ namespace ts
         {
             uint32_t length = 0;
             Symbol  *array  = ts_language_supertypes(impl.get(), &length);
-            if (!array || length == 0)
+            if (!array)
             {
+                return {};
+            }
+
+            if (length == 0)
+            {
+                std::free(array);
                 return {};
             }
 
@@ -428,8 +463,14 @@ namespace ts
         {
             uint32_t length = 0;
             Symbol  *array  = ts_language_subtypes(impl.get(), supertype, &length);
-            if (!array || length == 0)
+            if (!array)
             {
+                return {};
+            }
+
+            if (length == 0)
+            {
+                std::free(array);
                 return {};
             }
 
@@ -773,6 +814,11 @@ namespace ts
         Tree(TSTree *tree) : impl{ tree, ts_tree_delete }
         {}
 
+        Tree(const Tree &other) : impl{ ts_tree_copy(other.impl.get()), ts_tree_delete }
+        {}
+
+        Tree(Tree &&other) noexcept = default;
+
         ////////////////////////////////////////////////////////////////
         // Flags
         ////////////////////////////////////////////////////////////////
@@ -783,7 +829,7 @@ namespace ts
         }
 
         ////////////////////////////////////////////////////////////////
-        // Getters
+        // Root
         ////////////////////////////////////////////////////////////////
 
         [[nodiscard]] Node getRootNode() const
@@ -791,9 +837,132 @@ namespace ts
             return Node{ ts_tree_root_node(impl.get()) };
         }
 
+        [[nodiscard]] Node getRootNodeWithOffset(uint32_t offset_bytes, Point offset_extent) const
+        {
+            return Node{ ts_tree_root_node_with_offset(impl.get(), offset_bytes, offset_extent) };
+        }
+
+        void edit(const InputEdit &edit)
+        {
+            if (edit.start_byte > edit.old_end_byte || edit.start_point > edit.old_end_point)
+            {
+                throw std::invalid_argument("Tree-sitter: Invalid edit ranges (start > old_end)");
+            }
+
+            ts_tree_edit(impl.get(), &edit);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Ranges
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] std::vector<Range> getIncludedRanges() const
+        {
+            uint32_t length = 0;
+            TSRange *array  = ts_tree_included_ranges(impl.get(), &length);
+            if (!array)
+            {
+                return {};
+            }
+
+            if (length == 0)
+            {
+                std::free(array);
+                return {};
+            }
+
+            std::vector<Range> vec;
+            vec.reserve(length);
+            for (uint32_t i = 0; i < length; ++i)
+            {
+                vec.emplace_back(array[i]);
+            }
+
+            std::free(array);
+            return vec;
+        }
+
+        [[nodiscard]] static std::vector<Range> getChangedRanges(const Tree &old_tree, const Tree &new_tree)
+        {
+            uint32_t length = 0;
+            TSRange *array  = ts_tree_get_changed_ranges(static_cast<const TSTree *>(old_tree),
+                                                        static_cast<const TSTree *>(new_tree),
+                                                        &length);
+            if (!array)
+            {
+                return {};
+            }
+
+            if (length == 0)
+            {
+                std::free(array);
+                return {};
+            }
+
+            std::vector<Range> vec;
+            vec.reserve(length);
+            for (uint32_t i = 0; i < length; ++i)
+            {
+                vec.emplace_back(array[i]);
+            }
+
+            std::free(array);
+            return vec;
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Language
+        ////////////////////////////////////////////////////////////////
+
         [[nodiscard]] Language getLanguage() const
         {
             return Language{ ts_tree_language(impl.get()) };
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Copy
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] Tree copy() const
+        {
+            return Tree(*this);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Debugging
+        ////////////////////////////////////////////////////////////////
+
+        void printDotGraph(int file_descriptor)
+        {
+            ts_tree_print_dot_graph(impl.get(), file_descriptor);
+        }
+
+        void printDotGraph(FILE *file)
+        {
+            if (file)
+            {
+                printDotGraph(TS_FILENO(file));
+            }
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        Tree &operator=(const Tree &other)
+        {
+            if (this != &other)
+            {
+                impl.reset(ts_tree_copy(other.impl.get()));
+            }
+            return *this;
+        }
+
+        Tree &operator=(Tree &&other) noexcept = default;
+
+        [[nodiscard]] operator const TSTree *() const
+        {
+            return impl.get();
         }
 
     private:
@@ -890,8 +1059,14 @@ namespace ts
         {
             uint32_t       length = 0;
             const TSRange *array  = ts_parser_included_ranges(impl.get(), &length);
-            if (!array || length == 0)
+            if (!array)
             {
+                return {};
+            }
+
+            if (length == 0)
+            {
+                std::free(array);
                 return {};
             }
 
@@ -909,39 +1084,59 @@ namespace ts
         // Parsing
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Tree parse(Input &input)
+        [[nodiscard]] Tree parse(Input                                     &input,
+                                 details::OptionalParam<Tree>               old_tree = {},
+                                 details::OptionalParam<const ParseOptions> options  = {})
         {
             Input::current_input_ptr = &input;
 
-            TSTree *new_tree = ts_parser_parse(impl.get(), nullptr, input);
+            TSTree               *raw_old_tree = details::get_raw<Tree, TSTree>(old_tree);
+            const TSParseOptions *raw_options  = nullptr;
+
+            TSParseOptions c_options;
+#if defined(TS_CXX_17) || defined(TS_CXX_20)
+            if (options.has_value())
+            {
+                c_options = static_cast<TSParseOptions>(options->get());
+#else
+            if (options)
+            {
+                c_options = static_cast<TSParseOptions>(*options);
+#endif
+                raw_options = &c_options;
+            }
+
+            TSTree *new_tree = nullptr;
+            if (raw_options)
+            {
+                new_tree = ts_parser_parse_with_options(impl.get(), raw_old_tree, input, *raw_options);
+            }
+            else
+            {
+                new_tree = ts_parser_parse(impl.get(), raw_old_tree, input);
+            }
 
             Input::current_input_ptr = nullptr;
-
             return Tree(new_tree);
         }
 
-        [[nodiscard]] Tree parseWithOptions(Input &input, const ParseOptions &parse_options)
+        [[nodiscard]] Tree parseString(details::StringViewParameter buffer, details::OptionalParam<Tree> old_tree = {})
         {
-            Input::current_input_ptr = &input;
+            TSTree *raw_old_tree = details::get_raw<Tree, TSTree>(old_tree);
 
-            TSTree *new_tree = ts_parser_parse_with_options(impl.get(), nullptr, input, parse_options);
-
-            Input::current_input_ptr = nullptr;
-
-            return Tree(new_tree);
-        }
-
-        [[nodiscard]] Tree parseString(details::StringViewParameter buffer)
-        {
             return Tree{
-                ts_parser_parse_string(impl.get(), nullptr, buffer.data(), static_cast<uint32_t>(buffer.size()))
+                ts_parser_parse_string(impl.get(), raw_old_tree, buffer.data(), static_cast<uint32_t>(buffer.size()))
             };
         }
 
-        [[nodiscard]] Tree parseStringEncoded(details::StringViewParameter buffer, InputEncoding encoding)
+        [[nodiscard]] Tree parseStringEncoded(details::StringViewParameter buffer,
+                                              InputEncoding                encoding,
+                                              details::OptionalParam<Tree> old_tree = {})
         {
+            TSTree *raw_old_tree = details::get_raw<Tree, TSTree>(old_tree);
+
             return Tree{ ts_parser_parse_string_encoding(impl.get(),
-                                                         nullptr,
+                                                         raw_old_tree,
                                                          buffer.data(),
                                                          static_cast<uint32_t>(buffer.size()),
                                                          static_cast<TSInputEncoding>(encoding)) };
@@ -951,22 +1146,16 @@ namespace ts
         // Debugging
         ////////////////////////////////////////////////////////////////
 
-        void enableDotGraphs(int fd)
+        void enableDotGraphs(int file_descriptor)
         {
-            ts_parser_print_dot_graphs(impl.get(), fd);
+            ts_parser_print_dot_graphs(impl.get(), file_descriptor);
         }
 
         void enableDotGraphs(FILE *file)
         {
             if (file)
             {
-#if defined(_WIN32) && !defined(__CYGWIN__)
-                // On Windows we get descriptor using _fileno
-                enableDotGraphs(_fileno(file));
-#else
-                // On POSIX systems we use fileno z <cstdio>
-                enableDotGraphs(fileno(file));
-#endif
+                enableDotGraphs(TS_FILENO(file));
             }
         }
 
@@ -1567,7 +1756,7 @@ namespace ts
 
     template <VisitorConcept F>
 #else
-    template <typename F>
+template <typename F>
 #endif
     void visit(Node root, F &&callback)
     {
