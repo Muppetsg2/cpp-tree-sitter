@@ -22,6 +22,7 @@ The easiest way to include `cpp-tree-sitter` is via CPM. Adding this wrapper aut
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
+
 project(MyParser)
 
 set(CMAKE_CXX_STANDARD 17) # Works with 11, 14, 17, 20
@@ -36,11 +37,19 @@ CPMAddPackage(
 )
 
 # Download a grammar (e.g., JSON) and make it a CMake target
-add_grammar_from_git_repo(
+add_grammar(
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
     VERSION 0.24.8
 )
+
+# or if you have grammar downloaded you can specify location using:
+# add_grammar(
+#     NAME tree-sitter-json
+#     SOURCE_DIR path/to/dir/tree-sitter-json
+# )
+#
+# or set TREE_SITTER_GRAMMAR_PATH before downloading cpp-tree-sitter
 
 add_executable(demo main.cpp)
 target_link_libraries(demo PRIVATE cpp-tree-sitter tree-sitter-json)
