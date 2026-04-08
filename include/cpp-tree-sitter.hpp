@@ -174,11 +174,12 @@ namespace ts
     // Direct alias of { major_version: uint8_t; minor_version: uint8_t; patch_version: uint8_t }
     using LanguageMetadata = TSLanguageMetadata;
 
-    using StateID = uint16_t;
-    using Symbol  = uint16_t;
-    using FieldID = uint16_t;
-    using Version = uint32_t;
-    using NodeID  = uintptr_t;
+    using WasmEngine = wasm_engine_t;
+    using StateID    = uint16_t;
+    using Symbol     = uint16_t;
+    using FieldID    = uint16_t;
+    using Version    = uint32_t;
+    using NodeID     = uintptr_t;
 
     namespace details
     {
@@ -208,6 +209,96 @@ namespace ts
             return opt ? static_cast<Raw *>(static_cast<void *>(opt)) : nullptr;
         }
 #endif
+
+        struct QueryErrorHelper
+        {
+            static void validate(uint32_t error_offset, TSQueryError &error)
+            {
+                if (error == TSQueryErrorNone)
+                {
+                    return;
+                }
+
+                StringViewReturn type_name;
+                switch (error)
+                {
+                    case TSQueryErrorSyntax:
+                        type_name = "Syntax";
+                        break;
+                    case TSQueryErrorNodeType:
+                        type_name = "Node Type";
+                        break;
+                    case TSQueryErrorField:
+                        type_name = "Field";
+                        break;
+                    case TSQueryErrorCapture:
+                        type_name = "Capture";
+                        break;
+                    case TSQueryErrorStructure:
+                        type_name = "Structure";
+                        break;
+                    case TSQueryErrorLanguage:
+                        type_name = "Language";
+                        break;
+                    default:
+                        type_name = "Unknown";
+                        break;
+                }
+
+                throw std::runtime_error("Tree-sitter Query Error at offset " + std::to_string(error_offset)
+                                         + " (Type: " + type_name + ")");
+            }
+        };
+
+        struct WasmErrorHelper
+        {
+            static void validate(TSWasmError &error)
+            {
+                if (error.kind == TSWasmErrorKindNone)
+                {
+                    return;
+                }
+
+                StringViewReturn kind_name;
+                switch (error.kind)
+                {
+                    case TSWasmErrorKindParse:
+                        kind_name = "Parse";
+                        break;
+                    case TSWasmErrorKindCompile:
+                        kind_name = "Compile";
+                        break;
+                    case TSWasmErrorKindInstantiate:
+                        kind_name = "Instantiate";
+                        break;
+                    case TSWasmErrorKindAllocate:
+                        kind_name = "Allocate";
+                        break;
+                    default:
+                        kind_name = "Unknown";
+                        break;
+                }
+
+                std::string message = error.message ? error.message : "No message";
+
+                if (error.message)
+                {
+                    std::free(error.message);
+                }
+
+                throw std::runtime_error("Tree-sitter Wasm Error [" + std::string(kind_name) + "]: " + message);
+            }
+        };
+
+        [[nodiscard]] inline StringViewReturn make_view(const char *str)
+        {
+            return str ? StringViewReturn(str) : StringViewReturn();
+        }
+
+        [[nodiscard]] inline StringViewReturn make_view(const char *str, uint32_t length)
+        {
+            return (str && length > 0) ? StringViewReturn(str) : StringViewReturn();
+        }
     } // namespace details
 
 #if defined(TS_CXX_17) || defined(TS_CXX_20)
@@ -261,7 +352,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // Point
-    // ...
+    // A location in source code in terms of rows and columns.
     /////////////////////////////////////////////////////////////////////////////
 
     struct Point
@@ -334,7 +425,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // InputEdit
-    // ...
+    // Data describing an edit to a source code string.
     /////////////////////////////////////////////////////////////////////////////
 
     struct InputEdit
@@ -444,7 +535,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // Input
-    // ...
+    // A structure that defines how to read and decode source code incrementally.
     /////////////////////////////////////////////////////////////////////////////
 
     struct Input
@@ -507,7 +598,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // ParseState
-    // ...
+    // A structure representing the state of the parser at a specific position.
     /////////////////////////////////////////////////////////////////////////////
 
     struct ParseState
@@ -522,7 +613,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // ParseOptions
-    // ...
+    // Options that control the behavior of the parsing process.
     /////////////////////////////////////////////////////////////////////////////
 
     struct ParseOptions
@@ -556,7 +647,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // QueryCapture
-    // ...
+    // A capture of a specific node by a specific name within a query pattern.
     /////////////////////////////////////////////////////////////////////////////
 
     struct QueryCapture
@@ -571,7 +662,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // QueryMatch
-    // ...
+    // A single match found by a query, containing one or more captures.
     /////////////////////////////////////////////////////////////////////////////
 
     struct QueryMatch
@@ -595,7 +686,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // QueryCursorState
-    // ...
+    // The current state of an active query cursor.
     /////////////////////////////////////////////////////////////////////////////
 
     struct QueryCursorState
@@ -608,7 +699,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // QueryCursorOptions
-    // ...
+    // Configuration options for a query cursor, such as progress callbacks.
     /////////////////////////////////////////////////////////////////////////////
 
     struct QueryCursorOptions
@@ -642,7 +733,7 @@ namespace ts
 
     /////////////////////////////////////////////////////////////////////////////
     // QueryPredicateStep
-    // ...
+    // A single step in a predicate defined within a query pattern.
     /////////////////////////////////////////////////////////////////////////////
 
     struct QueryPredicateStep
@@ -704,7 +795,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getSymbolName(Symbol symbol) const
         {
-            return ts_language_symbol_name(impl.get(), symbol);
+            return details::make_view(ts_language_symbol_name(impl.get(), symbol));
         }
 
         [[nodiscard]] SymbolType getSymbolType(Symbol symbol) const
@@ -723,7 +814,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getFieldNameForID(FieldID id) const
         {
-            return ts_language_field_name_for_id(impl.get(), id);
+            return details::make_view(ts_language_field_name_for_id(impl.get(), id));
         }
 
         [[nodiscard]] FieldID getFieldIDForName(details::StringViewParameter name) const
@@ -794,8 +885,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getName() const
         {
-            const char *name = ts_language_name(impl.get());
-            return name ? details::StringViewReturn(name) : details::StringViewReturn("");
+            return details::make_view(ts_language_name(impl.get()));
         }
 
         [[nodiscard]] Version getVersion() const
@@ -819,6 +909,11 @@ namespace ts
 #endif
             }
             return LanguageMetadata{ metadata->major_version, metadata->minor_version, metadata->patch_version };
+        }
+
+        [[nodiscard]] bool isWasm() const
+        {
+            return ts_language_is_wasm(impl.get());
         }
 
         ////////////////////////////////////////////////////////////////
@@ -868,7 +963,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getType() const
         {
-            return ts_node_type(impl);
+            return details::make_view(ts_node_type(impl));
         }
 
         [[nodiscard]] Symbol getSymbol() const
@@ -878,7 +973,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getGrammarType() const
         {
-            return ts_node_grammar_type(impl);
+            return details::make_view(ts_node_grammar_type(impl));
         }
 
         [[nodiscard]] Symbol getGrammarSymbol() const
@@ -950,7 +1045,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getSourceRange(details::StringViewParameter source) const
         {
-            if (this->isNull())
+            if (isNull())
             {
                 return {};
             }
@@ -1109,14 +1204,14 @@ namespace ts
         // Fields
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] details::StringViewReturn getFieldNameForChild(uint32_t child_position) const
+        [[nodiscard]] details::StringViewReturn getFieldNameForChild(uint32_t child_index) const
         {
-            return ts_node_field_name_for_child(impl, child_position);
+            return details::make_view(ts_node_field_name_for_child(impl, child_index));
         }
 
         [[nodiscard]] details::StringViewReturn getFieldNameForNamedChild(uint32_t named_child_index) const
         {
-            return ts_node_field_name_for_named_child(impl, child_position);
+            return details::make_view(ts_node_field_name_for_named_child(impl, named_child_index));
         }
 
         [[nodiscard]] Node getChildByFieldName(details::StringViewParameter name) const
@@ -1426,6 +1521,11 @@ namespace ts
             return ts_parser_set_included_ranges(impl.get(), merged.data(), static_cast<uint32_t>(merged.size()));
         }
 
+        void setWasmStore(WasmStore &store)
+        {
+            ts_parser_set_wasm_store(impl.get(), store);
+        }
+
         [[nodiscard]] Language getCurrentLanguage() const
         {
             return Language{ ts_parser_language(impl.get()) };
@@ -1454,6 +1554,12 @@ namespace ts
             }
 
             return vec;
+        }
+
+        [[nodiscard]] WasmStore takeWasmStore()
+        {
+            TSWasmStore *raw_store = ts_parser_take_wasm_store(impl.get());
+            return WasmStore{ raw_store };
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1691,8 +1797,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getCurrentFieldName() const
         {
-            const char *name = ts_tree_cursor_current_field_name(&impl);
-            return raw ? details::StringViewReturn(raw) : details::StringViewReturn("");
+            return details::make_view(ts_tree_cursor_current_field_name(&impl));
         }
 
         [[nodiscard]] FieldID getCurrentFieldID() const
@@ -1756,49 +1861,13 @@ namespace ts
                                           &error_offset,
                                           &error_type);
 
+            details::QueryErrorHelper::validate(error_offset, error_type);
+
             if (!query)
             {
-                std::string error_type_str = "None";
-
-                switch (error_type)
-                {
-                    case TSQueryErrorSyntax:
-                    {
-                        error_type_str = "Syntax";
-                        break;
-                    }
-                    case TSQueryErrorNodeType:
-                    {
-                        error_type_str = "Node Type";
-                        break;
-                    }
-                    case TSQueryErrorField:
-                    {
-                        error_type_str = "Field";
-                        break;
-                    }
-                    case TSQueryErrorCapture:
-                    {
-                        error_type_str = "Capture";
-                        break;
-                    }
-                    case TSQueryErrorStructure:
-                    {
-                        error_type_str = "Structure";
-                        break;
-                    }
-                    case TSQueryErrorLanguage:
-                    {
-                        error_type_str = "Language";
-                        break;
-                    }
-                    default:
-                        break;
-                }
-
-                throw std::runtime_error("Tree-sitter Query Error at offset " + std::to_string(error_offset)
-                                         + " (Type: " + error_type_str + ")");
+                throw std::runtime_error("Tree-sitter: Failed to create Query");
             }
+
             impl.reset(query);
         }
 
@@ -1878,7 +1947,7 @@ namespace ts
         {
             uint32_t    length;
             const char *name = ts_query_capture_name_for_id(impl.get(), id, &length);
-            return { name, length };
+            return details::make_view(name, length);
         }
 
         [[nodiscard]] Quantifier getCaptureQuantifierForID(uint32_t pattern_index, uint32_t capture_index) const
@@ -1891,7 +1960,7 @@ namespace ts
         {
             uint32_t    length;
             const char *name = ts_query_string_value_for_id(impl.get(), id, &length);
-            return { name, length };
+            return details::make_view(name, length);
         }
 
         ////////////////////////////////////////////////////////////////
@@ -2122,8 +2191,7 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getCurrentSymbolName() const
         {
-            const char *name = ts_lookahead_iterator_current_symbol_name(impl.get());
-            return name ? details::StringViewReturn(name) : details::StringViewReturn("");
+            return details::make_view(ts_lookahead_iterator_current_symbol_name(impl.get()));
         }
 
         ////////////////////////////////////////////////////////////////
@@ -2152,6 +2220,75 @@ namespace ts
     {
         return LookaheadIterator(impl.get(), state);
     }
+
+    /////////////////////////////////////////////////////////////////////////////
+    // WasmStore
+    // Manages WebAssembly environments and loading Wasm-based languages.
+    /////////////////////////////////////////////////////////////////////////////
+
+    class WasmStore
+    {
+    public:
+        //////////////////////////////////////////////////////////////
+        // Lifecycle
+        //////////////////////////////////////////////////////////////
+
+        WasmStore(WasmEngine *engine)
+        {
+            TSWasmError  error{ TSWasmErrorKindNone, nullptr };
+            TSWasmStore *store = ts_wasm_store_new(engine, &error);
+
+            details::WasmErrorHelper::validate(error);
+
+            if (!store)
+            {
+                throw std::runtime_error("Tree-sitter: Failed to create Wasm store");
+            }
+            impl.reset(store);
+        }
+
+        explicit WasmStore(TSWasmStore *store) : impl{ store, ts_wasm_store_delete }
+        {}
+
+        WasmStore(const WasmStore &)                = delete;
+        WasmStore &operator=(const WasmStore &)     = delete;
+        WasmStore(WasmStore &&) noexcept            = default;
+        WasmStore &operator=(WasmStore &&) noexcept = default;
+
+        //////////////////////////////////////////////////////////////
+        // Methods
+        //////////////////////////////////////////////////////////////
+
+        [[nodiscard]] Language loadLanguage(details::StringViewParameter name, details::StringViewParameter wasm_buffer)
+        {
+            TSWasmError       error{ TSWasmErrorKindNone, nullptr };
+            const TSLanguage *lang = ts_wasm_store_load_language(impl.get(),
+                                                                 name.data(),
+                                                                 wasm_buffer.data(),
+                                                                 static_cast<uint32_t>(wasm_buffer.size()),
+                                                                 &error);
+
+            details::WasmErrorHelper::validate(error);
+            return Language{ lang };
+        }
+
+        [[nodiscard]] size_t getLanguageCount() const
+        {
+            return ts_wasm_store_language_count(impl.get());
+        }
+
+        //////////////////////////////////////////////////////////////
+        // Converters
+        //////////////////////////////////////////////////////////////
+
+        [[nodiscard]] operator TSWasmStore *() const
+        {
+            return impl.get();
+        }
+
+    private:
+        std::unique_ptr<TSWasmStore, decltype(&ts_wasm_store_delete)> impl{ nullptr, ts_wasm_store_delete };
+    };
 
     /////////////////////////////////////////////////////////////////////////////
     // Child Node Iterators

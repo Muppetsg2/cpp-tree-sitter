@@ -1,105 +1,113 @@
 # cpp-tree-sitter
 
-... is a simple C++ and CMake wrapper around tree-sitter. This project provides
-CMake definitions and a C++ wrapper that help with
-* managing tree-sitter and tree-sitter grammars as dependencies
-* accessing basic tree-sitter APIs for parse tree inspection
+`cpp-tree-sitter` is a modern, lightweight **C++11 (and newer)** wrapper around the [tree-sitter](https://github.com/tree-sitter/tree-sitter/) parsing library. 
+It provides a clean, RAII-compliant interface and CMake integrations to simplify working with syntax trees in C++ projects.
+> Note on this Fork: This project is a significant evolution of the original repository by Nick Sumner. It has been rewritten to support older C++ standards (back to C++11), full Query/Wasm support, and advanced tree traversal utilities.
 
-## Using in a CMake project
+## Key Features
+* **Modern RAII API:** Automatic memory management for Parsers, Trees, Nodes, and Cursors using standard smart pointers.
+* **Broad Compatibility:** Supports **C++11, C++14, C++17, and C++20**. It automatically leverages modern features like `std::string_view` and `std::concepts` if available, while providing fallbacks for older standards.
+* **STL-style Iterators:** Use standard `for` loops to iterate over child nodes.
+* **Tree Visitor:** A built-in Depth-First Search (DFS) visitor (`ts::visit`) for easy tree traversal.
+* **Wasm Support:** High-level wrappers for loading and managing WebAssembly-based grammars.
+* **Query Engine:** Full support for tree-sitter queries (patterns and captures).
+* **CMake Integration:** Easy dependency management using [CPM.cmake](https://github.com/cpm-cmake/cpm.cmake).
 
-... requires the [CPM](https://github.com/cpm-cmake/CPM.cmake) CMake module
-for fetching and managing dependencies from github. Adding `cpp-tree-sitter`
-as a CPM dependency makes `cpp-tree-sitter` available as a library and
-provides a function, `add_grammar_from_repo`, that will download and
-make available a standard tree-sitter grammar on GitHub as a library.
+## Requirements
+* **Compiler:** C++11 compatible or newer (C++17/20 recommended).
+* **Build System:** [CMake](https://cmake.org/) 3.20 or newer.
 
-The tree-sitter parser
-[example](https://tree-sitter.github.io/tree-sitter/using-parsers#an-example-program)
-can be reproduced in a CMake project with CPM by including the following in
-`CMakeLists.txt`:
+## Using in a CMake Project
+The easiest way to include `cpp-tree-sitter` is via CPM. Adding this wrapper automatically makes the core `tree-sitter` library available as well.
 
 ```cmake
+cmake_minimum_required(VERSION 3.20)
+project(MyParser)
+
+set(CMAKE_CXX_STANDARD 17) # Works with 11, 14, 17, 20
+
 include(cmake/CPM.cmake)
 
-# Downloads this wrapper library and tree-sitter.
-# Makes them available via the `cpp-tree-sitter` CMake library target.
+# Download the wrapper and tree-sitter core
 CPMAddPackage(
-	NAME cpp-tree-sitter
-	GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter
-	GIT_TAG main
+    NAME cpp-tree-sitter
+    GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter
+    GIT_TAG main
 )
 
-# Downloads a tree-sitter grammar from github and makes it available as a
-# cmake library target.
+# Download a grammar (e.g., JSON) and make it a CMake target
 add_grammar_from_git_repo(
-	NAME tree-sitter-json                 								# Defines the library name for a grammar
-	GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git  # Repository URL of a tree-sitter grammar
-	VERSION 0.19.0                                              		# Version tag for the grammar
+    NAME tree-sitter-json
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
+    VERSION 0.24.8
 )
 
-# Use the library in a demo program.
-add_executable(demo)
-target_sources(demo
-  PRIVATE
-    demo.cpp
-)
-target_link_libraries(demo
-  tree-sitter-json
-  cpp-tree-sitter
-)
+add_executable(demo main.cpp)
+target_link_libraries(demo PRIVATE cpp-tree-sitter tree-sitter-json)
 ```
 
-Translating the parsing and tree inspection operations from the example to
-use the C++ wrappers then yields a `demo.cpp` like:
+## Quick Start Example
+
+This example demonstrates parsing a JSON string and using the visitor to inspect nodes.
 
 ```cpp
-#include <cassert>
-#include <cstdio>
-#include <memory>
-#include <string>
-
+#include <iostream>
 #include <cpp-tree-sitter.h>
 
-
-extern "C" {
-TSLanguage* tree_sitter_json();
-}
-
+// Extern declaration for the grammar function
+extern "C" TSLanguage* tree_sitter_json();
 
 int main() {
-  // Create a language and parser.
-  ts::Language language = tree_sitter_json();
-  ts::Parser parser{language};
+    // Initialize language and parser
+    ts::Language language = tree_sitter_json();
+    ts::Parser parser{language};
 
-  // Parse the provided string into a syntax tree.
-  std::string sourcecode = "[1, null]";
-  ts::Tree tree = parser.parseString(sourcecode);
+    // Parse source code into a syntax tree
+    std::string code = "[1, null, \"example\"]";
+    ts::Tree tree = parser.parseString(code);
+    ts::Node root = tree.getRootNode();
 
-  // Get the root node of the syntax tree. 
-  ts::Node root = tree.getRootNode();
+    // Use the Visitor for easy traversal (New in this fork)
+    ts::visit(root, [](ts::Node node) {
+        if (node.isNamed()) {
+            std::cout << "Node: " << node.getType() << " at " 
+                      << node.getByteRange().start << "\n";
+        }
+    });
 
-  // Get some child nodes.
-  ts::Node array = root.getNamedChild(0);
-  ts::Node number = array.getNamedChild(0);
+    // Or use STL-style iteration
+    for (auto child : ts::Children{root}) {
+        std::cout << "Child type: " << child.getType() << "\n";
+    }
 
-  // Check that the nodes have the expected types.
-  assert(root.getType() == "document");
-  assert(array.getType() == "array");
-  assert(number.getType() == "number");
-
-  // Check that the nodes have the expected child counts.
-  assert(root.getNumChildren() == 1);
-  assert(array.getNumChildren() == 5);
-  assert(array.getNumNamedChildren() == 2);
-  assert(number.getNumChildren() == 0);
-
-  // Print the syntax tree as an S-expression.
-  auto treestring = root.getSExpr();
-  printf("Syntax tree: %s\n", treestring.get());
-
-  return 0;
+    return 0; // Resources are cleaned up automatically via RAII
 }
 ```
 
-In particular, some of the underlying APIs now use method calls for
-easier discoverability, and resource cleaning is automatic.
+## Major Improvements in this Fork
+
+### Memory & Safety
+While the original project provided basic wrappers, this fork implements a full-scale **RAII** architecture. It includes specialized `FreeHelpe`r functors to ensure that internal C-allocated strings (like S-Expressions) are freed correctly. It also introduces `shared_ptr` for `Language` objects to prevent use-after-free errors when multiple parsers share a grammar.
+
+### Compatibility Layer
+The library now features a custom `StringView` for C++11/14 environments and detects standard versions to enable `std::optional` or C++20 `concepts` dynamically.
+
+### Extended API
+* **Queries:** Added `Query` and `QueryCursor` classes to perform pattern matching.
+* **Wasm:** Added `WasmStore` and `WasmEngine` for WebAssembly environments.
+* **Cross-Platform:** Fixed Windows-specific issues regarding file descriptors for Dot graph generation.
+
+### Comparison Table
+|      Feature     |   Original Fork  |               This Fork               |
+|------------------|------------------|---------------------------------------|
+| **C++ Standard** |    C++17 only    |          C++11 through C++20          |
+|   **Traversal**  | Manual/Iterators |          Iterators + Visitor          |
+|    **Queries**   |        No        |             Yes (Full API)            |
+| **Wasm Support** |        No        |                  Yes                  |
+|  **RAII Scope**  |      Partial     |  Complete (Tree, Parser, Query, etc.) |
+
+
+## License
+This project is licensed under the [**MIT License**](LICENSE).
+Copyright (c) 2023 Nick Sumner
+Copyright (c) 2026 Muppetsg2
