@@ -297,7 +297,7 @@ namespace ts
 
         [[nodiscard]] inline StringViewReturn make_view(const char *str, uint32_t length)
         {
-            return (str && length > 0) ? StringViewReturn(str) : StringViewReturn();
+            return (str && length > 0) ? StringViewReturn(str, length) : StringViewReturn();
         }
     } // namespace details
 
