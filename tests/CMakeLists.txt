@@ -1,21 +1,30 @@
+# Change this value to test with different c++ versions
+set(TEST_CXX_STANDARD 11 CACHE STRING "C++ standard for tests" FORCE)
+
 set(PCH_FILE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp)
 set(TARGET_NAME ${PROJECT_NAME}-tests)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+file(GLOB_RECURSE TESTS_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+
 enable_testing()
 
-add_executable(${TARGET_NAME} "tests.cpp")
+add_executable(${TARGET_NAME} ${TESTS_FILES})
 
 target_precompile_headers(${TARGET_NAME} PUBLIC ${PCH_FILE})
 
-set_target_properties(${TARGET_NAME} PROPERTIES
+set_target_properties(${TARGET_NAME} PROPERTIES 
     LINKER_LANGUAGE CXX
-    CXX_EXTENSIONS OFF
+    CXX_STANDARD_REQUIRED ON
+    CXX_STANDARD ${TEST_CXX_STANDARD}
 )
 
-target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
+# target_compile_features(${TARGET_NAME} PRIVATE cxx_std_${TEST_CXX_STANDARD})
 
 target_include_directories(${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+get_target_property(ACTUAL_STANDARD ${TARGET_NAME} CXX_STANDARD)
+message(STATUS "Actual standard for ${TARGET_NAME}: ${ACTUAL_STANDARD}")
 
 if(WIN32)
     target_compile_definitions(${TARGET_NAME} PRIVATE _WIN32)

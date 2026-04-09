@@ -14,6 +14,7 @@
       "installDir": "${sourceDir}/out/install/${presetName}",
 	    "cacheVariables": {
         "CMAKE_CXX_STANDARD_REQUIRED": true,
+		    "CMAKE_CXX_EXTENSIONS": false,
 		    "BUILD_SHARED_LIBS": false,
 		    "CMAKE_DISABLE_IN_SOURCE_BUILD": true,
 		    "CMAKE_DISABLE_SOURCE_CHANGES": true

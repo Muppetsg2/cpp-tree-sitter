@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -41,10 +43,15 @@
 // On Windows we get descriptor using _fileno
 #include <io.h>
 #define TS_FILENO _fileno
+// On Windows we create duplicate of descriptor using _dup
+#define TS_DUP _dup
 #else
-// On POSIX systems we use fileno z <cstdio>
+// On POSIX systems we use fileno from <cstdio>
 #include <cstdio>
 #define TS_FILENO fileno
+// On POSIX systems we use dup from <unistd.h>
+#include <unistd.h>
+#define TS_DUP dup
 #endif
 
 #include <tree_sitter/api.h>
@@ -82,6 +89,9 @@ namespace ts
     {
         T start;
         T end;
+
+        Extent() : start(T()), end(T())
+        {}
 
         Extent(T start_value, T end_value) : start(start_value), end(end_value)
         {}
@@ -170,7 +180,7 @@ namespace ts
                     return 1;
                 }
             }
-            return 0;
+            return result;
         }
 
         [[nodiscard]] int compare(const char *s) const
@@ -415,6 +425,9 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
+        Point() : row(0), column(0)
+        {}
+
         Point(uint32_t row_value, uint32_t column_value) : row(row_value), column(column_value)
         {}
 
@@ -570,6 +583,9 @@ namespace ts
         ////////////////////////////////////////////////////////////////
         // Lifecycle
         ////////////////////////////////////////////////////////////////
+
+        explicit Range(Extent<Point> point_value, Extent<uint32_t> byte_value) : point(point_value), byte(byte_value)
+        {}
 
         explicit Range(const TSRange &range)
             : point(range.start_point, range.end_point), byte(range.start_byte, range.end_byte)
@@ -921,6 +937,11 @@ namespace ts
         explicit Node(TSNode node) : impl{ node }
         {}
 
+        [[nodiscard]] static Node null()
+        {
+            return Node{ TSNode{} };
+        }
+
         ////////////////////////////////////////////////////////////////
         // Identification & Type
         ////////////////////////////////////////////////////////////////
@@ -928,32 +949,32 @@ namespace ts
         // Returns a unique identifier for a node in a parse tree.
         [[nodiscard]] NodeID getID() const
         {
-            return reinterpret_cast<NodeID>(impl.id);
+            return isNull() ? 0 : reinterpret_cast<NodeID>(impl.id);
         }
 
         [[nodiscard]] details::StringViewReturn getType() const
         {
-            return details::make_view(ts_node_type(impl));
+            return isNull() ? details::StringViewReturn("") : details::make_view(ts_node_type(impl));
         }
 
         [[nodiscard]] Symbol getSymbol() const
         {
-            return ts_node_symbol(impl);
+            return isNull() ? 0 : ts_node_symbol(impl);
         }
 
         [[nodiscard]] details::StringViewReturn getGrammarType() const
         {
-            return details::make_view(ts_node_grammar_type(impl));
+            return isNull() ? details::StringViewReturn("") : details::make_view(ts_node_grammar_type(impl));
         }
 
         [[nodiscard]] Symbol getGrammarSymbol() const
         {
-            return ts_node_grammar_symbol(impl);
+            return isNull() ? 0 : ts_node_grammar_symbol(impl);
         }
 
         [[nodiscard]] Language getLanguage() const
         {
-            return Language{ ts_node_language(impl) };
+            return isNull() ? Language{ nullptr } : Language{ ts_node_language(impl) };
         }
 
         ////////////////////////////////////////////////////////////////
@@ -967,32 +988,32 @@ namespace ts
 
         [[nodiscard]] bool isNamed() const
         {
-            return ts_node_is_named(impl);
+            return !isNull() && ts_node_is_named(impl);
         }
 
         [[nodiscard]] bool isMissing() const
         {
-            return ts_node_is_missing(impl);
+            return !isNull() && ts_node_is_missing(impl);
         }
 
         [[nodiscard]] bool isExtra() const
         {
-            return ts_node_is_extra(impl);
+            return !isNull() && ts_node_is_extra(impl);
         }
 
         [[nodiscard]] bool isError() const
         {
-            return ts_node_is_error(impl);
+            return !isNull() && ts_node_is_error(impl);
         }
 
         [[nodiscard]] bool hasError() const
         {
-            return ts_node_has_error(impl);
+            return !isNull() && ts_node_has_error(impl);
         }
 
         [[nodiscard]] bool hasChanges() const
         {
-            return ts_node_has_changes(impl);
+            return !isNull() && ts_node_has_changes(impl);
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1001,12 +1022,13 @@ namespace ts
 
         [[nodiscard]] Extent<uint32_t> getByteRange() const
         {
-            return { ts_node_start_byte(impl), ts_node_end_byte(impl) };
+            return isNull() ? Extent<uint32_t>()
+                            : Extent<uint32_t>({ ts_node_start_byte(impl), ts_node_end_byte(impl) });
         }
 
         [[nodiscard]] Extent<Point> getPointRange() const
         {
-            return { ts_node_start_point(impl), ts_node_end_point(impl) };
+            return isNull() ? Extent<Point>() : Extent<Point>({ ts_node_start_point(impl), ts_node_end_point(impl) });
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1030,12 +1052,16 @@ namespace ts
 
         [[nodiscard]] std::string getSourceText(details::StringViewParameter source) const
         {
-            return std::string(getSourceRange(source));
+            return isNull() ? "" : std::string(getSourceRange(source));
         }
 
         // Returns an S-Expression representation of the subtree rooted at this node.
         [[nodiscard]] std::unique_ptr<char, FreeHelper> getSExpr() const
         {
+            if (isNull())
+            {
+                return nullptr;
+            }
             return std::unique_ptr<char, FreeHelper>{ ts_node_string(impl) };
         }
 
@@ -1045,22 +1071,22 @@ namespace ts
 
         [[nodiscard]] Node getParent() const
         {
-            return Node{ ts_node_parent(impl) };
+            return isNull() ? null() : Node{ ts_node_parent(impl) };
         }
 
         [[nodiscard]] Node getNextSibling() const
         {
-            return Node{ ts_node_next_sibling(impl) };
+            return isNull() ? null() : Node{ ts_node_next_sibling(impl) };
         }
 
         [[nodiscard]] Node getPreviousSibling() const
         {
-            return Node{ ts_node_prev_sibling(impl) };
+            return isNull() ? null() : Node{ ts_node_prev_sibling(impl) };
         }
 
         [[nodiscard]] uint32_t getChildCount() const
         {
-            return ts_node_child_count(impl);
+            return isNull() ? 0 : ts_node_child_count(impl);
         }
 
         [[nodiscard]] Node getChild(uint32_t child_index) const
@@ -1087,6 +1113,10 @@ namespace ts
 
         [[nodiscard]] Node getChildWithDescendant(Node descendant) const
         {
+            if (isNull() || descendant.isNull())
+            {
+                return null();
+            }
             return Node{ ts_node_child_with_descendant(impl, descendant.impl) };
         }
 
@@ -1096,17 +1126,17 @@ namespace ts
 
         [[nodiscard]] Node getNextNamedSibling() const
         {
-            return Node{ ts_node_next_named_sibling(impl) };
+            return isNull() ? null() : Node{ ts_node_next_named_sibling(impl) };
         }
 
         [[nodiscard]] Node getPreviousNamedSibling() const
         {
-            return Node{ ts_node_prev_named_sibling(impl) };
+            return isNull() ? null() : Node{ ts_node_prev_named_sibling(impl) };
         }
 
         [[nodiscard]] uint32_t getNamedChildCount() const
         {
-            return ts_node_named_child_count(impl);
+            return isNull() ? 0 : ts_node_named_child_count(impl);
         }
 
         [[nodiscard]] Node getNamedChild(uint32_t child_index) const
@@ -1137,37 +1167,37 @@ namespace ts
 
         [[nodiscard]] uint32_t getDescendantsCount() const
         {
-            return ts_node_descendant_count(impl);
+            return isNull() ? 0 : ts_node_descendant_count(impl);
         }
 
         [[nodiscard]] Node getFirstChildForByte(uint32_t byte) const
         {
-            return Node{ ts_node_first_child_for_byte(impl, byte) };
+            return isNull() ? null() : Node{ ts_node_first_child_for_byte(impl, byte) };
         }
 
         [[nodiscard]] Node getFirstNamedChildForByte(uint32_t byte) const
         {
-            return Node{ ts_node_first_named_child_for_byte(impl, byte) };
+            return isNull() ? null() : Node{ ts_node_first_named_child_for_byte(impl, byte) };
         }
 
         [[nodiscard]] Node getDescendantForByteRange(Extent<uint32_t> range) const
         {
-            return Node{ ts_node_descendant_for_byte_range(impl, range.start, range.end) };
+            return isNull() ? null() : Node{ ts_node_descendant_for_byte_range(impl, range.start, range.end) };
         }
 
         [[nodiscard]] Node getNamedDescendantForByteRange(Extent<uint32_t> range) const
         {
-            return Node{ ts_node_named_descendant_for_byte_range(impl, range.start, range.end) };
+            return isNull() ? null() : Node{ ts_node_named_descendant_for_byte_range(impl, range.start, range.end) };
         }
 
         [[nodiscard]] Node getDescendantForPointRange(Extent<Point> range) const
         {
-            return Node{ ts_node_descendant_for_point_range(impl, range.start, range.end) };
+            return isNull() ? null() : Node{ ts_node_descendant_for_point_range(impl, range.start, range.end) };
         }
 
         [[nodiscard]] Node getNamedDescendantForPointRange(Extent<Point> range) const
         {
-            return Node{ ts_node_named_descendant_for_point_range(impl, range.start, range.end) };
+            return isNull() ? null() : Node{ ts_node_named_descendant_for_point_range(impl, range.start, range.end) };
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1176,22 +1206,26 @@ namespace ts
 
         [[nodiscard]] details::StringViewReturn getFieldNameForChild(uint32_t child_index) const
         {
-            return details::make_view(ts_node_field_name_for_child(impl, child_index));
+            return isNull() ? details::StringViewReturn("")
+                            : details::make_view(ts_node_field_name_for_child(impl, child_index));
         }
 
         [[nodiscard]] details::StringViewReturn getFieldNameForNamedChild(uint32_t named_child_index) const
         {
-            return details::make_view(ts_node_field_name_for_named_child(impl, named_child_index));
+            return isNull() ? details::StringViewReturn("")
+                            : details::make_view(ts_node_field_name_for_named_child(impl, named_child_index));
         }
 
         [[nodiscard]] Node getChildByFieldName(details::StringViewParameter name) const
         {
-            return Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
+            return isNull()
+                         ? null()
+                         : Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
         }
 
         [[nodiscard]] Node getChildByFieldID(FieldID field_id) const
         {
-            return Node{ ts_node_child_by_field_id(impl, field_id) };
+            return isNull() ? null() : Node{ ts_node_child_by_field_id(impl, field_id) };
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1200,12 +1234,12 @@ namespace ts
 
         [[nodiscard]] StateID getParseState() const
         {
-            return ts_node_parse_state(impl);
+            return isNull() ? 0 : ts_node_parse_state(impl);
         }
 
         [[nodiscard]] StateID getNextParseState() const
         {
-            return ts_node_next_parse_state(impl);
+            return isNull() ? 0 : ts_node_next_parse_state(impl);
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1388,6 +1422,22 @@ namespace ts
             {
                 printDotGraph(TS_FILENO(file));
             }
+        }
+
+        void printDotGraph(details::StringViewParameter path)
+        {
+            std::string path_str(path.data(), path.size());
+
+#if defined(_WIN32)
+            FILE *file = nullptr;
+            fopen_s(&file, path_str.c_str(), "w");
+#else
+            FILE *file = fopen(path_str.c_str(), "w");
+#endif
+            printDotGraph(file);
+
+            // Close local file descriptor after write
+            fclose(file);
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1599,7 +1649,22 @@ namespace ts
 
         void enableDotGraphs(int file_descriptor)
         {
-            ts_parser_print_dot_graphs(impl.get(), file_descriptor);
+            if (file_descriptor >= 0)
+            {
+                // Creates duplicate of user descriptor
+                int duplicated_fd = TS_DUP(file_descriptor);
+
+                if (duplicated_fd == -1)
+                {
+                    throw std::runtime_error("Tree-sitter: Failed to duplicate file descriptor for DOT graphs");
+                }
+
+                ts_parser_print_dot_graphs(impl.get(), duplicated_fd);
+            }
+            else
+            {
+                ts_parser_print_dot_graphs(impl.get(), -1);
+            }
         }
 
         void enableDotGraphs(FILE *file)
@@ -1608,6 +1673,22 @@ namespace ts
             {
                 enableDotGraphs(TS_FILENO(file));
             }
+        }
+
+        void enableDotGraphs(details::StringViewParameter path)
+        {
+            std::string path_str(path.data(), path.size());
+
+#if defined(_WIN32)
+            FILE *file = nullptr;
+            fopen_s(&file, path_str.c_str(), "w");
+#else
+            FILE *file = fopen(path_str.c_str(), "w");
+#endif
+            enableDotGraphs(file);
+
+            // Close local file descriptor
+            fclose(file);
         }
 
         void disableDotGraphs()
@@ -1682,7 +1763,7 @@ namespace ts
         // By default avoid copies until the ergonomics are clearer.
         TreeCursor(const TreeCursor &other) = delete;
 
-        TreeCursor(TreeCursor &&other) : impl{}
+        TreeCursor(TreeCursor &&other) noexcept : impl{}
         {
             std::swap(impl, other.impl);
         }
@@ -2117,7 +2198,7 @@ namespace ts
 
         void resetMaxStartDepth()
         {
-            ts_query_cursor_set_max_start_depth(impl.get(), UINT32_MAX);
+            ts_query_cursor_set_max_start_depth(impl.get(), std::numeric_limits<uint32_t>::max());
         }
 
         ////////////////////////////////////////////////////////////////
