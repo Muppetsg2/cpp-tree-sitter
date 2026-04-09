@@ -96,7 +96,7 @@ int main() {
 ## Major Improvements in this Fork
 
 ### Memory & Safety
-While the original project provided basic wrappers, this fork implements a full-scale **RAII** architecture. It includes specialized `FreeHelpe`r functors to ensure that internal C-allocated strings (like S-Expressions) are freed correctly. It also introduces `shared_ptr` for `Language` objects to prevent use-after-free errors when multiple parsers share a grammar.
+While the original project provided basic wrappers, this fork implements a full-scale **RAII** architecture. It includes specialized `FreeHelper` functors to ensure that internal C-allocated strings (like S-Expressions) are freed correctly. It also introduces `shared_ptr` for `Language` objects to prevent use-after-free errors when multiple parsers share a grammar.
 
 ### Compatibility Layer
 The library now features a custom `StringView` for C++11/14 environments and detects standard versions to enable `std::optional` or C++20 `concepts` dynamically.
