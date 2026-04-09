@@ -4,14 +4,20 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 include(get_cpm)
 
+if(PROJECT_IS_TOP_LEVEL)
+	option(BUILD_TESTS "Build test for cpp-tree-sitter" ON)
+else()
+	option(BUILD_TESTS "Build test for cpp-tree-sitter" OFF)
+endif()
+
+set(TREE_SITTER_GRAMMAR_PATH "" CACHE PATH "Path to locally installed tree-sitter grammars")
+
 project(
     cpp-tree-sitter
     VERSION 0.26.8
     LANGUAGES C CXX
     DESCRIPTION "Simple C++ and CMake wrapper around tree-sitter."
 )
-
-set(TREE_SITTER_GRAMMAR_PATH "" CACHE PATH "Path to locally installed tree-sitter grammars")
 
 # We want to automatically download and provide tree-sitter to users of
 # the package, so pull it in and retrofit cmake dependencies on top of it.
@@ -103,6 +109,10 @@ function(add_grammar)
 
         add_library(${NAME} STATIC "${GRAMMAR_SOURCE_DIR}/src/parser.c" ${maybe_scanner})
 
+		if(MSVC)
+			target_compile_definitions(${NAME} PRIVATE NOMINMAX)
+		endif()
+
         # parser.h is stored within the src directory, so we need to include
         # src in the search paths
         target_include_directories(${NAME} PRIVATE $<BUILD_INTERFACE:${GRAMMAR_SOURCE_DIR}/src>)
@@ -132,10 +142,10 @@ function(add_grammar)
     endif()
 endfunction()
 
-add_library(cpp-tree-sitter INTERFACE)
-target_include_directories(cpp-tree-sitter INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
-target_link_libraries(cpp-tree-sitter INTERFACE tree-sitter)
-target_compile_options(cpp-tree-sitter INTERFACE 
+add_library(${PROJECT_NAME} INTERFACE)
+target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
+target_link_libraries(${PROJECT_NAME} INTERFACE tree-sitter)
+target_compile_options(${PROJECT_NAME} INTERFACE 
 	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
 		/W4
 		/Zc:__cplusplus
@@ -147,3 +157,7 @@ target_compile_options(cpp-tree-sitter INTERFACE
 		-Wextra
 	>
 )
+
+if(BUILD_TESTS)
+	add_subdirectory(tests)
+endif()

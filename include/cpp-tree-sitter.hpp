@@ -18,24 +18,23 @@
 /////////////////////////////////////////////////////////////////////////////
 
 #if defined(_MSVC_LANG)
-#define CPP_STANDARD _MSVC_LANG
+#define TS_CXX_LEVEL _MSVC_LANG
 #else
-#define CPP_STANDARD __cplusplus
+#define TS_CXX_LEVEL __cplusplus
 #endif
 
-#if CPP_STANDARD >= 202'002L
-#include <concepts>
-#include <utility>
-#define TS_CXX_20
-#elif CPP_STANDARD >= 201'703L
-#include <type_traits>
-#include <utility>
-#define TS_CXX_17
-#endif
+#define TS_HAS_CXX17 (TS_CXX_LEVEL >= 201703L)
+#define TS_HAS_CXX20 (TS_CXX_LEVEL >= 202002L)
 
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#if TS_HAS_CXX17
 #include <optional>
 #include <string_view>
+#include <type_traits>
+#include <utility>
+#endif
+
+#if TS_HAS_CXX20
+#include <concepts>
 #endif
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
@@ -61,6 +60,7 @@ namespace ts
     struct Node;
     class TreeCursor;
     class LookaheadIterator;
+    class WasmStore;
 
     /////////////////////////////////////////////////////////////////////////////
     // Helper Classes & Structs
@@ -82,9 +82,12 @@ namespace ts
     {
         T start;
         T end;
+
+        Extent(T start_value, T end_value) : start(start_value), end(end_value)
+        {}
     };
 
-#if !defined(TS_CXX_17) && !defined(TS_CXX_20)
+#if !TS_HAS_CXX17
     class StringView
     {
     public:
@@ -147,6 +150,50 @@ namespace ts
         }
 
         ////////////////////////////////////////////////////////////////
+        // Comparision
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] int compare(StringView v) const noexcept
+        {
+            const size_t rlen = (size_ < v.size_) ? size_ : v.size_;
+
+            int result = std::char_traits<char>::compare(data_, v.data_, rlen);
+
+            if (result == 0)
+            {
+                if (size_ < v.size_)
+                {
+                    return -1;
+                }
+                if (size_ > v.size_)
+                {
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
+        [[nodiscard]] int compare(const char *s) const
+        {
+            return compare(StringView(s));
+        }
+
+        [[nodiscard]] int compare(std::string &s) const
+        {
+            return compare(StringView(s));
+        }
+
+        [[nodiscard]] friend bool operator==(StringView lhs, StringView rhs) noexcept
+        {
+            return lhs.size() == rhs.size() && lhs.compare(rhs) == 0;
+        }
+
+        [[nodiscard]] friend bool operator!=(StringView lhs, StringView rhs) noexcept
+        {
+            return !(lhs == rhs);
+        }
+
+        ////////////////////////////////////////////////////////////////
         // Operators
         ////////////////////////////////////////////////////////////////
 
@@ -157,6 +204,10 @@ namespace ts
 
         explicit operator std::string() const
         {
+            if (!data_ || size_ == 0)
+            {
+                return "";
+            }
             return std::string(data_, size_);
         }
 
@@ -183,7 +234,7 @@ namespace ts
 
     namespace details
     {
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#if TS_HAS_CXX17
         using StringViewParameter = const std::string_view;
         using StringViewReturn    = std::string_view;
         using ByteViewU8_t        = const std::basic_string_view<uint8_t>;
@@ -194,10 +245,10 @@ namespace ts
         template <typename T, typename Raw>
         [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
         {
-            return opt.has_value() ? static_cast<Raw *>(static_cast<void *>(&opt->get())) : nullptr;
+            return opt.has_value() ? static_cast<Raw *>(opt->get()) : nullptr;
         }
 #else
-        using StringViewParameter = const std::string &;
+        using StringViewParameter = const StringView;
         using StringViewReturn    = StringView;
 
         template <typename T>
@@ -206,7 +257,7 @@ namespace ts
         template <typename T, typename Raw>
         [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
         {
-            return opt ? static_cast<Raw *>(static_cast<void *>(opt)) : nullptr;
+            return opt ? static_cast<Raw *>(*opt) : nullptr;
         }
 #endif
 
@@ -246,7 +297,7 @@ namespace ts
                 }
 
                 throw std::runtime_error("Tree-sitter Query Error at offset " + std::to_string(error_offset)
-                                         + " (Type: " + type_name + ")");
+                                         + " (Type: " + std::string(type_name) + ")");
             }
         };
 
@@ -301,7 +352,7 @@ namespace ts
         }
     } // namespace details
 
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#if TS_HAS_CXX17
     using DecodeFunction = std::function<uint32_t(details::ByteViewU8_t, int32_t *)>;
 #else
     using DecodeFunction = std::function<uint32_t(const uint8_t *, uint32_t, int32_t *)>;
@@ -364,6 +415,9 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
+        Point(uint32_t row_value, uint32_t column_value) : row(row_value), column(column_value)
+        {}
+
         Point(const TSPoint &other) : row(other.row), column(other.column)
         {}
 
@@ -408,7 +462,7 @@ namespace ts
             return !(*this < other);
         }
 
-        [[nodiscard]] static void is_valid_range(const Point &start, const Point &end)
+        [[nodiscard]] static bool is_valid_range(const Point &start, const Point &end)
         {
             return start <= end;
         }
@@ -441,6 +495,20 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
+        InputEdit(uint32_t start_byte_value,
+                  uint32_t old_end_byte_value,
+                  uint32_t new_end_byte_value,
+                  Point    start_point_value,
+                  Point    old_end_point_value,
+                  Point    new_end_point_value)
+            : start_byte(start_byte_value)
+            , old_end_byte(old_end_byte_value)
+            , new_end_byte(new_end_byte_value)
+            , start_point(start_point_value)
+            , old_end_point(old_end_point_value)
+            , new_end_point(new_end_point_value)
+        {}
+
         explicit InputEdit(const TSInputEdit &edit)
             : start_byte(edit.start_byte)
             , old_end_byte(edit.old_end_byte)
@@ -458,7 +526,7 @@ namespace ts
         {
             bool bytes_invalid = start_byte > old_end_byte;
 
-            bool points_invalid = Point::is_valid_range(start_point, old_end_point);
+            bool points_invalid = !Point::is_valid_range(start_point, old_end_point);
 
             if (bytes_invalid || points_invalid)
             {
@@ -480,8 +548,10 @@ namespace ts
     {
         edit.validate();
 
-        TSPoint raw_point = static_cast<TSPoint>(*this);
-        ts_point_edit(&raw_point, &byte_offset, &edit);
+        TSPoint     raw_point = static_cast<TSPoint>(*this);
+        TSInputEdit raw_edit  = static_cast<TSInputEdit>(edit);
+
+        ts_point_edit(&raw_point, &byte_offset, &raw_edit);
 
         row    = raw_point.row;
         column = raw_point.column;
@@ -511,11 +581,12 @@ namespace ts
 
         void edit(const InputEdit &edit)
         {
-            edit.validate(edit);
+            edit.validate();
 
-            TSRange raw_range = static_cast<TSRange>(*this);
+            TSRange     raw_range = static_cast<TSRange>(*this);
+            TSInputEdit raw_edit  = static_cast<TSInputEdit>(edit);
 
-            ts_range_edit(&raw_range, &edit);
+            ts_range_edit(&raw_range, &raw_edit);
 
             point.start = raw_range.start_point;
             point.end   = raw_range.end_point;
@@ -546,7 +617,15 @@ namespace ts
         InputEncoding      encoding;
         ts::DecodeFunction decode;
 
+#if TS_HAS_CXX17
         static thread_local const Input *current_input_ptr;
+#else
+        static const Input *&current_ptr()
+        {
+            thread_local const Input *ptr = nullptr;
+            return ptr;
+        }
+#endif
 
         ////////////////////////////////////////////////////////////////
         // Static Functions
@@ -566,14 +645,16 @@ namespace ts
 
         static uint32_t decode_proxy(const uint8_t *string, uint32_t length, int32_t *code_point)
         {
+#if TS_HAS_CXX17
             if (current_input_ptr && current_input_ptr->decode)
             {
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
                 // basic_string_view<uint8_t>, int32_t *
                 return current_input_ptr->decode({ string, length }, code_point);
 #else
+            if (current_ptr() && current_ptr()->decode)
+            {
                 // const uint8_t*, uint32_t, int32_t *
-                return current_input_ptr->decode(string, length, code_point);
+                return current_ptr()->decode(string, length, code_point);
 #endif
             }
             return 0;
@@ -594,7 +675,9 @@ namespace ts
         }
     };
 
+#if TS_HAS_CXX17
     inline thread_local const Input *Input::current_input_ptr = nullptr;
+#endif
 
     /////////////////////////////////////////////////////////////////////////////
     // ParseState
@@ -608,6 +691,10 @@ namespace ts
 
         explicit ParseState(const TSParseState *state)
             : current_byte_offset(state->current_byte_offset), has_error(state->has_error)
+        {}
+
+        explicit ParseState(const TSParseState &state)
+            : current_byte_offset(state.current_byte_offset), has_error(state.has_error)
         {}
     };
 
@@ -643,107 +730,6 @@ namespace ts
             options.progress_callback = (progress_callback) ? progress_callback_proxy : nullptr;
             return options;
         }
-    };
-
-    /////////////////////////////////////////////////////////////////////////////
-    // QueryCapture
-    // A capture of a specific node by a specific name within a query pattern.
-    /////////////////////////////////////////////////////////////////////////////
-
-    struct QueryCapture
-    {
-        Node     node;
-        uint32_t index;
-
-        // For easy conversion from C API
-        explicit QueryCapture(const TSQueryCapture &capture) : node(capture.node), index(capture.index)
-        {}
-    };
-
-    /////////////////////////////////////////////////////////////////////////////
-    // QueryMatch
-    // A single match found by a query, containing one or more captures.
-    /////////////////////////////////////////////////////////////////////////////
-
-    struct QueryMatch
-    {
-        uint32_t id;
-        uint16_t pattern_index;
-
-        // A vector is used for easy access; however, note that data copying occurs only when the QueryMatch object is
-        // instantiated.
-        std::vector<QueryCapture> captures;
-
-        explicit QueryMatch(const TSQueryMatch &match) : id(match.id), pattern_index(match.pattern_index)
-        {
-            captures.reserve(match.capture_count);
-            for (uint32_t i = 0; i < match.capture_count; ++i)
-            {
-                captures.emplace_back(match.captures[i]);
-            }
-        }
-    };
-
-    /////////////////////////////////////////////////////////////////////////////
-    // QueryCursorState
-    // The current state of an active query cursor.
-    /////////////////////////////////////////////////////////////////////////////
-
-    struct QueryCursorState
-    {
-        uint32_t current_byte_offset;
-
-        explicit QueryCursorState(const TSQueryCursorState *state) : current_byte_offset(state->current_byte_offset)
-        {}
-    };
-
-    /////////////////////////////////////////////////////////////////////////////
-    // QueryCursorOptions
-    // Configuration options for a query cursor, such as progress callbacks.
-    /////////////////////////////////////////////////////////////////////////////
-
-    struct QueryCursorOptions
-    {
-        using ProgressCallbackFunction = std::function<bool(QueryCursorState *)>;
-
-        ProgressCallbackFunction progress_callback;
-
-        static bool progress_callback_proxy(TSQueryCursorState *state)
-        {
-            if (state && state->payload)
-            {
-                auto *self = static_cast<QueryCursorOptions *>(state->payload);
-                if (self->progress_callback)
-                {
-                    QueryCursorState cpp_state(state);
-                    return self->progress_callback(&cpp_state);
-                }
-            }
-            return false;
-        }
-
-        operator TSQueryCursorOptions() const
-        {
-            TSQueryCursorOptions options{};
-            options.payload           = const_cast<ParseOptions *>(this);
-            options.progress_callback = (progress_callback) ? progress_callback_proxy : nullptr;
-            return options;
-        }
-    };
-
-    /////////////////////////////////////////////////////////////////////////////
-    // QueryPredicateStep
-    // A single step in a predicate defined within a query pattern.
-    /////////////////////////////////////////////////////////////////////////////
-
-    struct QueryPredicateStep
-    {
-        QueryPredicateStepType type;
-        uint32_t               value_id;
-
-        explicit QueryPredicateStep(const TSQueryPredicateStep *predicate_step)
-            : type(static_cast<QueryPredicateStepType>(predicate_step->type)), value_id(predicate_step->value_id)
-        {}
     };
 
     /////////////////////////////////////////////////////////////////////////////
@@ -828,43 +814,27 @@ namespace ts
 
         [[nodiscard]] std::vector<Symbol> getAllSuperTypes() const
         {
-            uint32_t count = 0;
-            Symbol  *array = ts_language_supertypes(impl.get(), &count);
-            if (!array)
+            uint32_t        count = 0;
+            const TSSymbol *array = ts_language_supertypes(impl.get(), &count);
+            if (!array || count == 0)
             {
-                return {};
-            }
-
-            if (count == 0)
-            {
-                std::free(array);
                 return {};
             }
 
             std::vector<Symbol> vec(array, array + count);
-            std::free(array);
-
             return vec;
         }
 
         [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol supertype) const
         {
-            uint32_t count = 0;
-            Symbol  *array = ts_language_subtypes(impl.get(), supertype, &count);
-            if (!array)
+            uint32_t        count = 0;
+            const TSSymbol *array = ts_language_subtypes(impl.get(), supertype, &count);
+            if (!array || count == 0)
             {
-                return {};
-            }
-
-            if (count == 0)
-            {
-                std::free(array);
                 return {};
             }
 
             std::vector<Symbol> vec(array, array + count);
-            std::free(array);
-
             return vec;
         }
 
@@ -893,7 +863,7 @@ namespace ts
             return ts_language_abi_version(impl.get());
         }
 
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#if TS_HAS_CXX17
         [[nodiscard]] std::optional<LanguageMetadata> getMetadata() const
 #else
         [[nodiscard]] LanguageMetadata getMetadata() const
@@ -902,7 +872,7 @@ namespace ts
             const TSLanguageMetadata *metadata = ts_language_metadata(impl.get());
             if (!metadata)
             {
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#if TS_HAS_CXX17
                 return std::nullopt;
 #else
                 return { 0, 0, 0 };
@@ -1244,9 +1214,11 @@ namespace ts
 
         void edit(const InputEdit &edit)
         {
-            edit.validate(edit);
+            edit.validate();
 
-            ts_node_edit(impl, &edit);
+            TSInputEdit raw_edit = static_cast<TSInputEdit>(edit);
+
+            ts_node_edit(&impl, &raw_edit);
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1318,9 +1290,11 @@ namespace ts
 
         void edit(const InputEdit &edit)
         {
-            edit.validate(edit);
+            edit.validate();
 
-            ts_tree_edit(impl.get(), &edit);
+            TSInputEdit raw_edit = static_cast<TSInputEdit>(edit);
+
+            ts_tree_edit(impl.get(), &raw_edit);
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1431,7 +1405,7 @@ namespace ts
 
         Tree &operator=(Tree &&other) noexcept = default;
 
-        [[nodiscard]] operator const TSTree *() const
+        [[nodiscard]] operator TSTree *() const noexcept
         {
             return impl.get();
         }
@@ -1521,10 +1495,7 @@ namespace ts
             return ts_parser_set_included_ranges(impl.get(), merged.data(), static_cast<uint32_t>(merged.size()));
         }
 
-        void setWasmStore(WasmStore &store)
-        {
-            ts_parser_set_wasm_store(impl.get(), store);
-        }
+        void setWasmStore(WasmStore &store);
 
         [[nodiscard]] Language getCurrentLanguage() const
         {
@@ -1535,14 +1506,8 @@ namespace ts
         {
             uint32_t       count = 0;
             const TSRange *array = ts_parser_included_ranges(impl.get(), &count);
-            if (!array)
+            if (!array || count == 0)
             {
-                return {};
-            }
-
-            if (count == 0)
-            {
-                std::free(array);
                 return {};
             }
 
@@ -1556,11 +1521,7 @@ namespace ts
             return vec;
         }
 
-        [[nodiscard]] WasmStore takeWasmStore()
-        {
-            TSWasmStore *raw_store = ts_parser_take_wasm_store(impl.get());
-            return WasmStore{ raw_store };
-        }
+        [[nodiscard]] WasmStore takeWasmStore();
 
         ////////////////////////////////////////////////////////////////
         // Parsing
@@ -1570,13 +1531,17 @@ namespace ts
                                  details::OptionalParam<Tree>               old_tree = {},
                                  details::OptionalParam<const ParseOptions> options  = {})
         {
+#if TS_HAS_CXX17
             Input::current_input_ptr = &input;
+#else
+            Input::current_ptr() = &input;
+#endif
 
             TSTree               *raw_old_tree = details::get_raw<Tree, TSTree>(old_tree);
             const TSParseOptions *raw_options  = nullptr;
 
             TSParseOptions c_options;
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#if TS_HAS_CXX17
             if (options.has_value())
             {
                 c_options = static_cast<TSParseOptions>(options->get());
@@ -1598,7 +1563,11 @@ namespace ts
                 new_tree = ts_parser_parse(impl.get(), raw_old_tree, input);
             }
 
+#if TS_HAS_CXX17
             Input::current_input_ptr = nullptr;
+#else
+            Input::current_ptr() = nullptr;
+#endif
             return Tree(new_tree);
         }
 
@@ -1839,6 +1808,117 @@ namespace ts
     }
 
     /////////////////////////////////////////////////////////////////////////////
+    // QueryCapture
+    // A capture of a specific node by a specific name within a query pattern.
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryCapture
+    {
+        Node     node;
+        uint32_t index;
+
+        // For easy conversion from C API
+        explicit QueryCapture(const TSQueryCapture &capture) : node(capture.node), index(capture.index)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryMatch
+    // A single match found by a query, containing one or more captures.
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryMatch
+    {
+        uint32_t id;
+        uint16_t pattern_index;
+
+        // A vector is used for easy access; however, note that data copying occurs only when the QueryMatch object is
+        // instantiated.
+        std::vector<QueryCapture> captures;
+
+        QueryMatch() : id(0), pattern_index(0)
+        {}
+
+        explicit QueryMatch(const TSQueryMatch &match) : id(match.id), pattern_index(match.pattern_index)
+        {
+            captures.reserve(match.capture_count);
+            for (uint32_t i = 0; i < match.capture_count; ++i)
+            {
+                captures.emplace_back(match.captures[i]);
+            }
+        }
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryCursorState
+    // The current state of an active query cursor.
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryCursorState
+    {
+        uint32_t current_byte_offset;
+
+        explicit QueryCursorState(const TSQueryCursorState *state) : current_byte_offset(state->current_byte_offset)
+        {}
+
+        explicit QueryCursorState(const TSQueryCursorState &state) : current_byte_offset(state.current_byte_offset)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryCursorOptions
+    // Configuration options for a query cursor, such as progress callbacks.
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryCursorOptions
+    {
+        using ProgressCallbackFunction = std::function<bool(QueryCursorState *)>;
+
+        ProgressCallbackFunction progress_callback;
+
+        static bool progress_callback_proxy(TSQueryCursorState *state)
+        {
+            if (state && state->payload)
+            {
+                auto *self = static_cast<QueryCursorOptions *>(state->payload);
+                if (self->progress_callback)
+                {
+                    QueryCursorState cpp_state(state);
+                    return self->progress_callback(&cpp_state);
+                }
+            }
+            return false;
+        }
+
+        operator TSQueryCursorOptions() const
+        {
+            TSQueryCursorOptions options{};
+            options.payload           = const_cast<QueryCursorOptions *>(this);
+            options.progress_callback = (progress_callback) ? progress_callback_proxy : nullptr;
+            return options;
+        }
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
+    // QueryPredicateStep
+    // A single step in a predicate defined within a query pattern.
+    /////////////////////////////////////////////////////////////////////////////
+
+    struct QueryPredicateStep
+    {
+        QueryPredicateStepType type;
+        uint32_t               value_id;
+
+        QueryPredicateStep(const TSQueryPredicateStep *predicate_step)
+            : type(static_cast<QueryPredicateStepType>(predicate_step->type)), value_id(predicate_step->value_id)
+        {}
+
+        QueryPredicateStep(const TSQueryPredicateStep &predicate_step)
+            : type(static_cast<QueryPredicateStepType>(predicate_step.type)), value_id(predicate_step.value_id)
+        {}
+    };
+
+    /////////////////////////////////////////////////////////////////////////////
     // Query
     // Compiled set of patterns used to search for structures in a syntax tree.
     /////////////////////////////////////////////////////////////////////////////
@@ -2068,12 +2148,12 @@ namespace ts
         // Execution
         ////////////////////////////////////////////////////////////////
 
-        void exec(const Query &query, Node node, details::OptionalParam<const QueryCursorOptions> query_options)
+        void exec(const Query &query, Node node, details::OptionalParam<const QueryCursorOptions> query_options = {})
         {
             const TSQueryCursorOptions *raw_options = nullptr;
 
             TSQueryCursorOptions c_options;
-#if defined(TS_CXX_17) || defined(TS_CXX_20)
+#if TS_HAS_CXX17
             if (query_options.has_value())
             {
                 c_options = static_cast<TSQueryCursorOptions>(query_options->get());
@@ -2290,6 +2370,17 @@ namespace ts
         std::unique_ptr<TSWasmStore, decltype(&ts_wasm_store_delete)> impl{ nullptr, ts_wasm_store_delete };
     };
 
+    inline void Parser::setWasmStore(WasmStore &store)
+    {
+        ts_parser_set_wasm_store(impl.get(), store);
+    }
+
+    [[nodiscard]] inline WasmStore Parser::takeWasmStore()
+    {
+        TSWasmStore *raw_store = ts_parser_take_wasm_store(impl.get());
+        return WasmStore{ raw_store };
+    }
+
     /////////////////////////////////////////////////////////////////////////////
     // Child Node Iterators
     // STL-compatible iterators for processing Node children.
@@ -2388,7 +2479,7 @@ namespace ts
         const ts::Node &node;
     };
 
-#if defined(TS_CXX_20)
+#if TS_HAS_CXX20
     static_assert(std::input_iterator<ChildIterator>);
     static_assert(std::sentinel_for<ChildIteratorSentinel, ChildIterator>);
 #endif
@@ -2398,7 +2489,14 @@ namespace ts
     // High-level utility for depth-first traversal of a syntax tree.
     /////////////////////////////////////////////////////////////////////////////
 
-#if defined(TS_CXX_17)
+#if TS_HAS_CXX20
+    template <typename T>
+    concept VisitorConcept = requires {
+        { std::declval<T>()(std::declval<Node>()) } -> std::same_as<void>;
+    };
+
+    template <VisitorConcept F>
+#elif TS_HAS_CXX17
     template <typename T, typename = void>
     struct VisitorConcept : std::false_type
     {};
@@ -2411,13 +2509,6 @@ namespace ts
     {};
 
     template <typename F, std::enable_if_t<VisitorConcept<F>::value, bool> = true>
-#elif defined(TS_CXX_20)
-    template <typename T>
-    concept VisitorConcept = requires {
-        { std::declval<T>()(std::declval<Node>()) } -> std::same_as<void>;
-    };
-
-    template <VisitorConcept F>
 #else
 template <typename F>
 #endif
