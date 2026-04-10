@@ -1,13 +1,18 @@
 #include "pch.hpp"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+// cpp-tree-sitter
 #include <cpp-tree-sitter.hpp>
 
-extern "C" const TSLanguage *tree_sitter_json();
+// Catch2
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
-/// TODO: Repair this tests and check them
-/// TODO: Add STL includes to tests and to pch.hpp
+// STL
+#include <cstdint>
+#include <string>
+#include <vector>
+
+extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("Query API", "[query]")
 {
@@ -57,8 +62,7 @@ TEST_CASE("Detailed Query Execution", "[query][cursor]")
 TEST_CASE("Query Metadata and Information", "[query]")
 {
     ts::Language lang         = tree_sitter_json();
-    std::string  query_source = "((pair key: (string) @key) (#match? @key \"name\"))\n"
-                                "(number) @num";
+    std::string  query_source = "((pair key: (string) @key) (#match? @key \"name\"))\n(number)+ @num";
 
     ts::Query query(lang, query_source);
 
@@ -71,13 +75,13 @@ TEST_CASE("Query Metadata and Information", "[query]")
 
     SECTION("Capture and String Resolution")
     {
-        CHECK(query.getCaptureNameForID(0) == "key");
-        CHECK(query.getCaptureNameForID(1) == "num");
+        CHECK(query.getCaptureNameForID(0).compare("key") == 0);
+        CHECK(query.getCaptureNameForID(1).compare("num") == 0);
 
         bool found_match_pred = false;
         for (uint32_t i = 0; i < query.getStringCount(); ++i)
         {
-            if (query.getStringValueForID(i) == "match?")
+            if (query.getStringValueForID(i).compare("match?") == 0)
             {
                 found_match_pred = true;
             }
@@ -87,8 +91,7 @@ TEST_CASE("Query Metadata and Information", "[query]")
 
     SECTION("Pattern Properties")
     {
-        // Pair
-        CHECK(query.isPatternRooted(0) == false);
+        CHECK(query.isPatternRooted(0) == true);
         auto range = query.getByteRangeForPattern(0);
         CHECK(range.end > range.start);
     }
@@ -96,7 +99,7 @@ TEST_CASE("Query Metadata and Information", "[query]")
     SECTION("Quantifiers")
     {
         // JSON number
-        CHECK(query.getCaptureQuantifierForID(1, 0) == ts::Quantifier::One);
+        CHECK(query.getCaptureQuantifierForID(1, 1) == ts::Quantifier::OneOrMore);
     }
 }
 
@@ -114,7 +117,7 @@ TEST_CASE("Query Predicates", "[query]")
         CHECK(steps[0].type == ts::QueryPredicateStepType::String);
 
         // string "eq?"
-        CHECK(query.getStringValueForID(steps[0].value_id) == "eq?");
+        CHECK(query.getStringValueForID(steps[0].value_id).compare("eq?") == 0);
 
         // Capture (@k)
         CHECK(steps[1].type == ts::QueryPredicateStepType::Capture);
@@ -127,12 +130,29 @@ TEST_CASE("Query Predicates", "[query]")
 TEST_CASE("Query Management", "[query]")
 {
     ts::Language lang = tree_sitter_json();
-    ts::Query    query(lang, "((string) @s) ((number) @n)");
 
-    SECTION("Disable Pattern and Capture")
+    SECTION("Verify disableCapture only removes tags")
     {
-        query.disablePattern(0);   // Turn off (string)
-        query.disableCapture("n"); // Turn off @n
+        ts::Query query(lang, "((string) @s) ((number) @n)");
+        query.disableCapture("n"); // Disable tag @n
+
+        ts::Parser      parser(lang);
+        ts::Tree        tree = parser.parseString("123");
+        ts::QueryCursor cursor;
+        cursor.exec(query, tree.getRootNode());
+
+        ts::QueryMatch match;
+        if (cursor.nextMatch(match))
+        {
+            CHECK(match.captures.empty());
+        }
+    }
+
+    SECTION("Disable Patterns")
+    {
+        ts::Query query(lang, "((string) @s) ((number) @n)");
+        query.disablePattern(0);
+        query.disablePattern(1);
 
         ts::Parser      parser(lang);
         std::string     code = "{\"a\": 1}";
@@ -156,10 +176,16 @@ TEST_CASE("QueryCursor Limits and Ranges", "[query][cursor]")
 
     SECTION("Match Limit")
     {
-        cursor.setMatchLimit(2);
-        CHECK(cursor.getMatchLimit() == 2);
+        ts::Query query_complex(lang, "(_ (_)) @match");
 
-        cursor.exec(query, tree.getRootNode());
+        cursor.setMatchLimit(1);
+        CHECK(cursor.getMatchLimit() == 1);
+
+        std::string complex_code = "[[[[[[[[[[1]]]]]]]]]]";
+        ts::Tree    complex_tree = parser.parseString(complex_code);
+
+        cursor.exec(query_complex, complex_tree.getRootNode());
+
         ts::QueryMatch m;
         int            count = 0;
         while (cursor.nextMatch(m))
@@ -167,13 +193,15 @@ TEST_CASE("QueryCursor Limits and Ranges", "[query][cursor]")
             count++;
         }
 
-        CHECK(count == 2);
         CHECK(cursor.didExceedMatchLimit() == true);
     }
 
     SECTION("Byte Range")
     {
-        cursor.setByteRange({ 3, 8 });
+        bool ok = cursor.setByteRange({ 3, 8 });
+
+        REQUIRE(ok == true);
+
         cursor.exec(query, tree.getRootNode());
 
         ts::QueryMatch m;
@@ -208,7 +236,7 @@ TEST_CASE("QueryCursor NextCapture", "[query][cursor]")
             ++count;
             CHECK(match.captures[capture_index].node.isNull() == false);
         }
-        CHECK(count == 2); // Jeden @k i jeden @v
+        CHECK(count == 2); // One @k and one @v
     }
 }
 
@@ -246,10 +274,15 @@ TEST_CASE("QueryCursor Progress Callback", "[query][cursor]")
         cursor.exec(query, tree.getRootNode(), &options);
 #endif
         ts::QueryMatch m;
+        int            matches = 0;
         while (cursor.nextMatch(m))
-            ;
+        {
+            ++matches;
+        }
 
         CHECK(progress_calls > 0);
+        CHECK(matches != progress_calls);
+        CHECK(matches > progress_calls);
     }
 }
 

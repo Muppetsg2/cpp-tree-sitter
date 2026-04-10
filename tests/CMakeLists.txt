@@ -1,5 +1,5 @@
 # Change this value to test with different c++ versions
-set(TEST_CXX_STANDARD 11 CACHE STRING "C++ standard for tests" FORCE)
+set(TEST_CXX_STANDARD 20 CACHE STRING "C++ standard for tests" FORCE)
 
 set(PCH_FILE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp)
 set(TARGET_NAME ${PROJECT_NAME}-tests)

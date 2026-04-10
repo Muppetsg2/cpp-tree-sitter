@@ -1,8 +1,17 @@
 #include "pch.hpp"
 
+// cpp-tree-sitter
+#include <cpp-tree-sitter.hpp>
+
+// Catch2
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
-#include <cpp-tree-sitter.hpp>
+
+// STL
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
 
 extern "C" const TSLanguage *tree_sitter_json();
 
@@ -121,7 +130,6 @@ TEST_CASE("Node identification and language", "[node]")
 
     SECTION("Grammar types")
     {
-        // getType() zwraca alias/nazwê, getGrammarType() zwraca nazwê z gramatyki
         CHECK(num_node.getType().compare("number") == 0);
         CHECK(num_node.getGrammarType().compare("number") == 0);
         CHECK(num_node.getGrammarSymbol() == num_node.getSymbol());
@@ -150,14 +158,12 @@ TEST_CASE("Node flags and states", "[node]")
 
     SECTION("Missing and Error nodes")
     {
-        // Niepe³ny JSON: [1,
         std::string code = "[1, ";
         ts::Tree    tree = parser.parseString(code);
         ts::Node    root = tree.getRootNode();
 
         CHECK(root.hasError());
 
-        // Szukamy brakuj¹cego wêz³a (missing) lub b³êdu
         ts::visit(root,
                   [](ts::Node n)
                   {
@@ -191,7 +197,6 @@ TEST_CASE("Node ranges and source", "[node]")
 
     SECTION("Source Range Validation")
     {
-        // Testowanie zabezpieczenia przed wyjœciem poza zakres
         std::string short_source = "  ";
         CHECK(str_node.getSourceRange(short_source).empty());
     }
@@ -207,10 +212,10 @@ TEST_CASE("Node navigation (extended)", "[node]")
 
     SECTION("Siblings and children")
     {
-        ts::Node first  = array.getChild(1); // To jest '1' (0 to '[')
-        ts::Node second = array.getChild(3); // To jest '2' (2 to ',')
+        ts::Node first  = array.getChild(1); // It is '1' (0 is '[')
+        ts::Node second = array.getChild(3); // It is '2' (2 is ',')
 
-        CHECK(first.getNextSibling() == array.getChild(2)); // przecinek
+        CHECK(first.getNextSibling() == array.getChild(2)); // comma
         CHECK(second.getPreviousSibling() == array.getChild(2));
 
         CHECK(array.getFirstChild().getType().compare("[") == 0);
@@ -249,7 +254,6 @@ TEST_CASE("Node Search and Fields (extended)", "[node]")
 
     SECTION("Search for children")
     {
-        // Szukamy wêz³a na konkretnym bajcie
         ts::Node found = pair.getFirstChildForByte(9);
         CHECK(found.getType().compare("number") == 0);
 
@@ -260,10 +264,9 @@ TEST_CASE("Node Search and Fields (extended)", "[node]")
     SECTION("Field access")
     {
         CHECK(pair.getFieldNameForChild(0).compare("key") == 0);
-        // "value" jest drugim nazwanym dzieckiem pary (po "key")
+        // "value" is second named child after "key"
         CHECK(pair.getFieldNameForNamedChild(1).compare("value") == 0);
 
-        // Pobieranie po ID (bardziej wydajne ni¿ string)
         uint16_t field_id = lang.getFieldIDForName("value");
         CHECK_FALSE(pair.getChildByFieldID(field_id).isNull());
     }
@@ -298,7 +301,7 @@ TEST_CASE("Node Mutation", "[node]")
 
     SECTION("Edit node")
     {
-        // Przesuwamy wêze³ w prawo o 1 bajt
+        // Move node one byte to right
         ts::InputEdit edit{ 0, 0, 1, { 0, 0 }, { 0, 0 }, { 0, 1 } };
 
         uint32_t old_start = node.getByteRange().start;

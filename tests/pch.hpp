@@ -5,9 +5,21 @@
 // cpp-tree-sitter
 #include <cpp-tree-sitter.hpp>
 
-// catch2
+// Catch2
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+
+// STL
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #if defined(_MSVC_LANG)
 #define TEST_CXX_LEVEL _MSVC_LANG

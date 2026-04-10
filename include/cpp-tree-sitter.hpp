@@ -90,7 +90,7 @@ namespace ts
         T start;
         T end;
 
-        Extent() : start(T()), end(T())
+        Extent() noexcept : start(T()), end(T())
         {}
 
         Extent(T start_value, T end_value) : start(start_value), end(end_value)
@@ -212,7 +212,7 @@ namespace ts
             return data_[pos];
         }
 
-        explicit operator std::string() const
+        [[nodiscard]] explicit operator std::string() const
         {
             if (!data_ || size_ == 0)
             {
@@ -360,6 +360,54 @@ namespace ts
         {
             return (str && length > 0) ? StringViewReturn(str, length) : StringViewReturn();
         }
+
+        template <typename TS_Options, typename TS_State, typename CPP_State>
+        struct OptionsBase
+        {
+            using ProgressCallbackFunction = std::function<bool(CPP_State *)>;
+            ProgressCallbackFunction progress_callback;
+
+            OptionsBase()
+            {
+                impl          = std::make_unique<TS_Options>();
+                impl->payload = this;
+            }
+
+            [[nodiscard]] static bool progress_callback_proxy(TS_State *state)
+            {
+                if (state && state->payload)
+                {
+                    auto *self = static_cast<OptionsBase *>(state->payload);
+                    if (self->progress_callback)
+                    {
+                        CPP_State cpp_state(state);
+                        return self->progress_callback(&cpp_state);
+                    }
+                }
+                return false;
+            }
+
+            [[nodiscard]] operator TS_Options() const
+            {
+                TS_Options options{};
+                options.payload           = const_cast<OptionsBase *>(this);
+                options.progress_callback = (progress_callback)
+                                                  ? reinterpret_cast<bool (*)(TS_State *)>(progress_callback_proxy)
+                                                  : nullptr;
+                return options;
+            }
+
+            [[nodiscard]] operator TS_Options *() const noexcept
+            {
+                impl->progress_callback = (progress_callback)
+                                                ? reinterpret_cast<bool (*)(TS_State *)>(progress_callback_proxy)
+                                                : nullptr;
+                return impl.get();
+            }
+
+        private:
+            std::unique_ptr<TS_Options> impl;
+        };
     } // namespace details
 
 #if TS_HAS_CXX17
@@ -425,7 +473,7 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        Point() : row(0), column(0)
+        Point() noexcept : row(0), column(0)
         {}
 
         Point(uint32_t row_value, uint32_t column_value) : row(row_value), column(column_value)
@@ -445,37 +493,37 @@ namespace ts
         // Comparision
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool operator==(const Point &other) const
+        [[nodiscard]] bool operator==(const Point &other) const noexcept
         {
             return row == other.row && column == other.column;
         }
 
-        [[nodiscard]] bool operator!=(const Point &other) const
+        [[nodiscard]] bool operator!=(const Point &other) const noexcept
         {
             return !(*this == other);
         }
 
-        [[nodiscard]] bool operator>(const Point &other) const
+        [[nodiscard]] bool operator>(const Point &other) const noexcept
         {
             return (row > other.row) || (row == other.row && column > other.column);
         }
 
-        [[nodiscard]] bool operator<=(const Point &other) const
+        [[nodiscard]] bool operator<=(const Point &other) const noexcept
         {
             return !(*this > other);
         }
 
-        [[nodiscard]] bool operator<(const Point &other) const
+        [[nodiscard]] bool operator<(const Point &other) const noexcept
         {
             return (row < other.row) || (row == other.row && column < other.column);
         }
 
-        [[nodiscard]] bool operator>=(const Point &other) const
+        [[nodiscard]] bool operator>=(const Point &other) const noexcept
         {
             return !(*this < other);
         }
 
-        [[nodiscard]] static bool is_valid_range(const Point &start, const Point &end)
+        [[nodiscard]] static bool is_valid_range(const Point &start, const Point &end) noexcept
         {
             return start <= end;
         }
@@ -484,7 +532,7 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        operator TSPoint() const
+        [[nodiscard]] operator TSPoint() const noexcept
         {
             return { row, column };
         }
@@ -551,13 +599,13 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        operator TSInputEdit() const
+        [[nodiscard]] operator TSInputEdit() const noexcept
         {
             return { start_byte, old_end_byte, new_end_byte, start_point, old_end_point, new_end_point };
         }
     };
 
-    inline void Point::edit(const InputEdit &edit, uint32_t &byte_offset)
+    [[nodiscard]] inline void Point::edit(const InputEdit &edit, uint32_t &byte_offset)
     {
         edit.validate();
 
@@ -614,7 +662,7 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        operator TSRange() const
+        [[nodiscard]] operator TSRange() const noexcept
         {
             return { point.start, point.end, byte.start, byte.end };
         }
@@ -633,10 +681,17 @@ namespace ts
         InputEncoding      encoding;
         ts::DecodeFunction decode;
 
+        Input()
+        {
+            impl          = std::make_unique<TSInput>();
+            impl->payload = const_cast<Input *>(this);
+            impl->read    = read_proxy;
+        }
+
 #if TS_HAS_CXX17
         static thread_local const Input *current_input_ptr;
 #else
-        static const Input *&current_ptr()
+        static const Input *&current_ptr() noexcept
         {
             thread_local const Input *ptr = nullptr;
             return ptr;
@@ -647,7 +702,10 @@ namespace ts
         // Static Functions
         ////////////////////////////////////////////////////////////////
 
-        static const char *read_proxy(void *payload, uint32_t byte_index, TSPoint position, uint32_t *bytes_read)
+        [[nodiscard]] static const char *read_proxy(void     *payload,
+                                                    uint32_t  byte_index,
+                                                    TSPoint   position,
+                                                    uint32_t *bytes_read)
         {
             auto *self = static_cast<Input *>(payload);
             if (self && self->read)
@@ -659,7 +717,7 @@ namespace ts
             return nullptr;
         }
 
-        static uint32_t decode_proxy(const uint8_t *string, uint32_t length, int32_t *code_point)
+        [[nodiscard]] static uint32_t decode_proxy(const uint8_t *string, uint32_t length, int32_t *code_point) noexcept
         {
 #if TS_HAS_CXX17
             if (current_input_ptr && current_input_ptr->decode)
@@ -680,7 +738,7 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        operator TSInput() const
+        [[nodiscard]] operator TSInput() const
         {
             TSInput c_input{};
             c_input.payload  = const_cast<Input *>(this);
@@ -689,6 +747,16 @@ namespace ts
             c_input.decode   = (decode) ? decode_proxy : nullptr;
             return c_input;
         }
+
+        [[nodiscard]] operator TSInput *() const noexcept
+        {
+            impl->encoding = static_cast<TSInputEncoding>(encoding);
+            impl->decode   = (decode) ? decode_proxy : nullptr;
+            return impl.get();
+        }
+
+    private:
+        std::unique_ptr<TSInput> impl;
     };
 
 #if TS_HAS_CXX17
@@ -705,11 +773,11 @@ namespace ts
         uint32_t current_byte_offset;
         bool     has_error;
 
-        explicit ParseState(const TSParseState *state)
+        explicit ParseState(const TSParseState *state) noexcept
             : current_byte_offset(state->current_byte_offset), has_error(state->has_error)
         {}
 
-        explicit ParseState(const TSParseState &state)
+        explicit ParseState(const TSParseState &state) noexcept
             : current_byte_offset(state.current_byte_offset), has_error(state.has_error)
         {}
     };
@@ -719,34 +787,7 @@ namespace ts
     // Options that control the behavior of the parsing process.
     /////////////////////////////////////////////////////////////////////////////
 
-    struct ParseOptions
-    {
-        using ProgressCallbackFunction = std::function<bool(ParseState *)>;
-
-        ProgressCallbackFunction progress_callback;
-
-        static bool progress_callback_proxy(TSParseState *state)
-        {
-            if (state && state->payload)
-            {
-                auto *self = static_cast<ParseOptions *>(state->payload);
-                if (self->progress_callback)
-                {
-                    ParseState cpp_state(state);
-                    return self->progress_callback(&cpp_state);
-                }
-            }
-            return false;
-        }
-
-        operator TSParseOptions() const
-        {
-            TSParseOptions options{};
-            options.payload           = const_cast<ParseOptions *>(this);
-            options.progress_callback = (progress_callback) ? progress_callback_proxy : nullptr;
-            return options;
-        }
-    };
+    using ParseOptions = details::OptionsBase<TSParseOptions, TSParseState, ParseState>;
 
     /////////////////////////////////////////////////////////////////////////////
     // Language
@@ -763,11 +804,11 @@ namespace ts
         // NOTE: Allowing implicit conversions from TSLanguage to Language
         // improves ergonomics for clients using external grammar providers.
 
-        /* implicit */ Language(const TSLanguage *language)
+        /* implicit */ Language(const TSLanguage *language) noexcept
             : impl{ language, [](const TSLanguage *l) { ts_language_delete(l); } }
         {}
 
-        Language(const Language &other) : Language(ts_language_copy(other.impl.get()))
+        Language(const Language &other) noexcept : Language(ts_language_copy(other.impl.get()))
         {}
 
         Language(Language &&other) noexcept = default;
@@ -776,17 +817,17 @@ namespace ts
         // Count Accessors
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] size_t getSymbolsCount() const
+        [[nodiscard]] size_t getSymbolsCount() const noexcept
         {
             return ts_language_symbol_count(impl.get());
         }
 
-        [[nodiscard]] size_t getStatesCount() const
+        [[nodiscard]] size_t getStatesCount() const noexcept
         {
             return ts_language_state_count(impl.get());
         }
 
-        [[nodiscard]] size_t getFieldsCount() const
+        [[nodiscard]] size_t getFieldsCount() const noexcept
         {
             return ts_language_field_count(impl.get());
         }
@@ -807,6 +848,11 @@ namespace ts
 
         [[nodiscard]] Symbol getSymbolForName(details::StringViewParameter name, bool isNamed) const
         {
+            if (name.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input name exceeds maximum size of 4GB");
+            }
+
             return ts_language_symbol_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()), isNamed);
         }
 
@@ -821,6 +867,11 @@ namespace ts
 
         [[nodiscard]] FieldID getFieldIDForName(details::StringViewParameter name) const
         {
+            if (name.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input name exceeds maximum size of 4GB");
+            }
+
             return ts_language_field_id_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
 
@@ -828,7 +879,7 @@ namespace ts
         // Type Hierarchy
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] std::vector<Symbol> getAllSuperTypes() const
+        [[nodiscard]] std::vector<Symbol> getAllSuperTypes() const noexcept
         {
             uint32_t        count = 0;
             const TSSymbol *array = ts_language_supertypes(impl.get(), &count);
@@ -841,7 +892,7 @@ namespace ts
             return vec;
         }
 
-        [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol supertype) const
+        [[nodiscard]] std::vector<Symbol> getAllSubTypesForSuperType(Symbol supertype) const noexcept
         {
             uint32_t        count = 0;
             const TSSymbol *array = ts_language_subtypes(impl.get(), supertype, &count);
@@ -858,7 +909,7 @@ namespace ts
         // State Navigation
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] StateID getNextState(StateID state, Symbol symbol) const
+        [[nodiscard]] StateID getNextState(StateID state, Symbol symbol) const noexcept
         {
             return ts_language_next_state(impl.get(), state, symbol);
         }
@@ -874,15 +925,15 @@ namespace ts
             return details::make_view(ts_language_name(impl.get()));
         }
 
-        [[nodiscard]] Version getVersion() const
+        [[nodiscard]] Version getVersion() const noexcept
         {
             return ts_language_abi_version(impl.get());
         }
 
 #if TS_HAS_CXX17
-        [[nodiscard]] std::optional<LanguageMetadata> getMetadata() const
+        [[nodiscard]] std::optional<LanguageMetadata> getMetadata() const noexcept
 #else
-        [[nodiscard]] LanguageMetadata getMetadata() const
+        [[nodiscard]] LanguageMetadata getMetadata() const noexcept
 #endif
         {
             const TSLanguageMetadata *metadata = ts_language_metadata(impl.get());
@@ -897,7 +948,7 @@ namespace ts
             return LanguageMetadata{ metadata->major_version, metadata->minor_version, metadata->patch_version };
         }
 
-        [[nodiscard]] bool isWasm() const
+        [[nodiscard]] bool isWasm() const noexcept
         {
             return ts_language_is_wasm(impl.get());
         }
@@ -906,7 +957,7 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        Language &operator=(Language other)
+        Language &operator=(Language other) noexcept
         {
             std::swap(impl, other.impl);
             return *this;
@@ -914,7 +965,7 @@ namespace ts
 
         Language &operator=(Language &&other) noexcept = default;
 
-        [[nodiscard]] operator const TSLanguage *() const
+        [[nodiscard]] operator const TSLanguage *() const noexcept
         {
             return impl.get();
         }
@@ -934,10 +985,10 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        explicit Node(TSNode node) : impl{ node }
+        explicit Node(TSNode node) noexcept : impl{ node }
         {}
 
-        [[nodiscard]] static Node null()
+        [[nodiscard]] static Node null() noexcept
         {
             return Node{ TSNode{} };
         }
@@ -947,7 +998,7 @@ namespace ts
         ////////////////////////////////////////////////////////////////
 
         // Returns a unique identifier for a node in a parse tree.
-        [[nodiscard]] NodeID getID() const
+        [[nodiscard]] NodeID getID() const noexcept
         {
             return isNull() ? 0 : reinterpret_cast<NodeID>(impl.id);
         }
@@ -957,7 +1008,7 @@ namespace ts
             return isNull() ? details::StringViewReturn("") : details::make_view(ts_node_type(impl));
         }
 
-        [[nodiscard]] Symbol getSymbol() const
+        [[nodiscard]] Symbol getSymbol() const noexcept
         {
             return isNull() ? 0 : ts_node_symbol(impl);
         }
@@ -967,12 +1018,12 @@ namespace ts
             return isNull() ? details::StringViewReturn("") : details::make_view(ts_node_grammar_type(impl));
         }
 
-        [[nodiscard]] Symbol getGrammarSymbol() const
+        [[nodiscard]] Symbol getGrammarSymbol() const noexcept
         {
             return isNull() ? 0 : ts_node_grammar_symbol(impl);
         }
 
-        [[nodiscard]] Language getLanguage() const
+        [[nodiscard]] Language getLanguage() const noexcept
         {
             return isNull() ? Language{ nullptr } : Language{ ts_node_language(impl) };
         }
@@ -981,37 +1032,37 @@ namespace ts
         // Flag Checks
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool isNull() const
+        [[nodiscard]] bool isNull() const noexcept
         {
             return ts_node_is_null(impl);
         }
 
-        [[nodiscard]] bool isNamed() const
+        [[nodiscard]] bool isNamed() const noexcept
         {
             return !isNull() && ts_node_is_named(impl);
         }
 
-        [[nodiscard]] bool isMissing() const
+        [[nodiscard]] bool isMissing() const noexcept
         {
             return !isNull() && ts_node_is_missing(impl);
         }
 
-        [[nodiscard]] bool isExtra() const
+        [[nodiscard]] bool isExtra() const noexcept
         {
             return !isNull() && ts_node_is_extra(impl);
         }
 
-        [[nodiscard]] bool isError() const
+        [[nodiscard]] bool isError() const noexcept
         {
             return !isNull() && ts_node_is_error(impl);
         }
 
-        [[nodiscard]] bool hasError() const
+        [[nodiscard]] bool hasError() const noexcept
         {
             return !isNull() && ts_node_has_error(impl);
         }
 
-        [[nodiscard]] bool hasChanges() const
+        [[nodiscard]] bool hasChanges() const noexcept
         {
             return !isNull() && ts_node_has_changes(impl);
         }
@@ -1020,13 +1071,13 @@ namespace ts
         // Ranges
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Extent<uint32_t> getByteRange() const
+        [[nodiscard]] Extent<uint32_t> getByteRange() const noexcept
         {
             return isNull() ? Extent<uint32_t>()
                             : Extent<uint32_t>({ ts_node_start_byte(impl), ts_node_end_byte(impl) });
         }
 
-        [[nodiscard]] Extent<Point> getPointRange() const
+        [[nodiscard]] Extent<Point> getPointRange() const noexcept
         {
             return isNull() ? Extent<Point>() : Extent<Point>({ ts_node_start_point(impl), ts_node_end_point(impl) });
         }
@@ -1069,22 +1120,22 @@ namespace ts
         // Navigation (General)
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Node getParent() const
+        [[nodiscard]] Node getParent() const noexcept
         {
             return isNull() ? null() : Node{ ts_node_parent(impl) };
         }
 
-        [[nodiscard]] Node getNextSibling() const
+        [[nodiscard]] Node getNextSibling() const noexcept
         {
             return isNull() ? null() : Node{ ts_node_next_sibling(impl) };
         }
 
-        [[nodiscard]] Node getPreviousSibling() const
+        [[nodiscard]] Node getPreviousSibling() const noexcept
         {
             return isNull() ? null() : Node{ ts_node_prev_sibling(impl) };
         }
 
-        [[nodiscard]] uint32_t getChildCount() const
+        [[nodiscard]] uint32_t getChildCount() const noexcept
         {
             return isNull() ? 0 : ts_node_child_count(impl);
         }
@@ -1124,17 +1175,17 @@ namespace ts
         // Navigation (Named Children)
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Node getNextNamedSibling() const
+        [[nodiscard]] Node getNextNamedSibling() const noexcept
         {
             return isNull() ? null() : Node{ ts_node_next_named_sibling(impl) };
         }
 
-        [[nodiscard]] Node getPreviousNamedSibling() const
+        [[nodiscard]] Node getPreviousNamedSibling() const noexcept
         {
             return isNull() ? null() : Node{ ts_node_prev_named_sibling(impl) };
         }
 
-        [[nodiscard]] uint32_t getNamedChildCount() const
+        [[nodiscard]] uint32_t getNamedChildCount() const noexcept
         {
             return isNull() ? 0 : ts_node_named_child_count(impl);
         }
@@ -1165,37 +1216,37 @@ namespace ts
         // Search & Descendants
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] uint32_t getDescendantsCount() const
+        [[nodiscard]] uint32_t getDescendantsCount() const noexcept
         {
             return isNull() ? 0 : ts_node_descendant_count(impl);
         }
 
-        [[nodiscard]] Node getFirstChildForByte(uint32_t byte) const
+        [[nodiscard]] Node getFirstChildForByte(uint32_t byte) const noexcept
         {
             return isNull() ? null() : Node{ ts_node_first_child_for_byte(impl, byte) };
         }
 
-        [[nodiscard]] Node getFirstNamedChildForByte(uint32_t byte) const
+        [[nodiscard]] Node getFirstNamedChildForByte(uint32_t byte) const noexcept
         {
             return isNull() ? null() : Node{ ts_node_first_named_child_for_byte(impl, byte) };
         }
 
-        [[nodiscard]] Node getDescendantForByteRange(Extent<uint32_t> range) const
+        [[nodiscard]] Node getDescendantForByteRange(Extent<uint32_t> range) const noexcept
         {
             return isNull() ? null() : Node{ ts_node_descendant_for_byte_range(impl, range.start, range.end) };
         }
 
-        [[nodiscard]] Node getNamedDescendantForByteRange(Extent<uint32_t> range) const
+        [[nodiscard]] Node getNamedDescendantForByteRange(Extent<uint32_t> range) const noexcept
         {
             return isNull() ? null() : Node{ ts_node_named_descendant_for_byte_range(impl, range.start, range.end) };
         }
 
-        [[nodiscard]] Node getDescendantForPointRange(Extent<Point> range) const
+        [[nodiscard]] Node getDescendantForPointRange(Extent<Point> range) const noexcept
         {
             return isNull() ? null() : Node{ ts_node_descendant_for_point_range(impl, range.start, range.end) };
         }
 
-        [[nodiscard]] Node getNamedDescendantForPointRange(Extent<Point> range) const
+        [[nodiscard]] Node getNamedDescendantForPointRange(Extent<Point> range) const noexcept
         {
             return isNull() ? null() : Node{ ts_node_named_descendant_for_point_range(impl, range.start, range.end) };
         }
@@ -1218,12 +1269,17 @@ namespace ts
 
         [[nodiscard]] Node getChildByFieldName(details::StringViewParameter name) const
         {
+            if (name.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input name exceeds maximum size of 4GB");
+            }
+
             return isNull()
                          ? null()
                          : Node{ ts_node_child_by_field_name(impl, name.data(), static_cast<uint32_t>(name.size())) };
         }
 
-        [[nodiscard]] Node getChildByFieldID(FieldID field_id) const
+        [[nodiscard]] Node getChildByFieldID(FieldID field_id) const noexcept
         {
             return isNull() ? null() : Node{ ts_node_child_by_field_id(impl, field_id) };
         }
@@ -1232,12 +1288,12 @@ namespace ts
         // Parsing State
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] StateID getParseState() const
+        [[nodiscard]] StateID getParseState() const noexcept
         {
             return isNull() ? 0 : ts_node_parse_state(impl);
         }
 
-        [[nodiscard]] StateID getNextParseState() const
+        [[nodiscard]] StateID getNextParseState() const noexcept
         {
             return isNull() ? 0 : ts_node_next_parse_state(impl);
         }
@@ -1260,18 +1316,18 @@ namespace ts
         ////////////////////////////////////////////////////////////////
 
         // Definition deferred until after the definition of TreeCursor.
-        [[nodiscard]] TreeCursor getCursor() const;
+        [[nodiscard]] TreeCursor getCursor() const noexcept;
 
         ////////////////////////////////////////////////////////////////
         // Comparison
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool operator==(const Node &other) const
+        [[nodiscard]] bool operator==(const Node &other) const noexcept
         {
             return ts_node_eq(impl, other.impl);
         }
 
-        [[nodiscard]] bool operator!=(const Node &other) const
+        [[nodiscard]] bool operator!=(const Node &other) const noexcept
         {
             return !(*this == other);
         }
@@ -1291,10 +1347,10 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        Tree(TSTree *tree) : impl{ tree, ts_tree_delete }
+        explicit Tree(TSTree *tree) noexcept : impl{ tree, ts_tree_delete }
         {}
 
-        Tree(const Tree &other) : impl{ ts_tree_copy(other.impl.get()), ts_tree_delete }
+        Tree(const Tree &other) noexcept : impl{ ts_tree_copy(other.impl.get()), ts_tree_delete }
         {}
 
         Tree(Tree &&other) noexcept = default;
@@ -1303,7 +1359,7 @@ namespace ts
         // Flags
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool hasError() const
+        [[nodiscard]] bool hasError() const noexcept
         {
             return getRootNode().hasError();
         }
@@ -1312,12 +1368,12 @@ namespace ts
         // Root
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Node getRootNode() const
+        [[nodiscard]] Node getRootNode() const noexcept
         {
             return Node{ ts_tree_root_node(impl.get()) };
         }
 
-        [[nodiscard]] Node getRootNodeWithOffset(uint32_t offset_bytes, Point offset_extent) const
+        [[nodiscard]] Node getRootNodeWithOffset(uint32_t offset_bytes, Point offset_extent) const noexcept
         {
             return Node{ ts_tree_root_node_with_offset(impl.get(), offset_bytes, offset_extent) };
         }
@@ -1393,7 +1449,7 @@ namespace ts
         // Language
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Language getLanguage() const
+        [[nodiscard]] Language getLanguage() const noexcept
         {
             return Language{ ts_tree_language(impl.get()) };
         }
@@ -1402,7 +1458,7 @@ namespace ts
         // Copy
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Tree copy() const
+        [[nodiscard]] Tree copy() const noexcept
         {
             return Tree(*this);
         }
@@ -1411,7 +1467,7 @@ namespace ts
         // Debugging
         ////////////////////////////////////////////////////////////////
 
-        void printDotGraph(int file_descriptor)
+        void printDotGraph(int file_descriptor) noexcept
         {
             ts_tree_print_dot_graph(impl.get(), file_descriptor);
         }
@@ -1494,7 +1550,7 @@ namespace ts
         // Configuration
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool setLanguage(Language language)
+        [[nodiscard]] bool setLanguage(Language language) noexcept
         {
             return ts_parser_set_language(impl.get(), language);
         }
@@ -1542,17 +1598,23 @@ namespace ts
                 }
             }
 
+            if (merged.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error(
+                        "Tree-sitter: Ranges size exceeds maximum size. (Max size is equal to UINT32_MAX value)");
+            }
+
             return ts_parser_set_included_ranges(impl.get(), merged.data(), static_cast<uint32_t>(merged.size()));
         }
 
-        void setWasmStore(WasmStore &store);
+        void setWasmStore(WasmStore &store) noexcept;
 
-        [[nodiscard]] Language getCurrentLanguage() const
+        [[nodiscard]] Language getCurrentLanguage() const noexcept
         {
             return Language{ ts_parser_language(impl.get()) };
         }
 
-        [[nodiscard]] std::vector<Range> getIncludedRanges() const
+        [[nodiscard]] std::vector<Range> getIncludedRanges() const noexcept
         {
             uint32_t       count = 0;
             const TSRange *array = ts_parser_included_ranges(impl.get(), &count);
@@ -1571,7 +1633,7 @@ namespace ts
             return vec;
         }
 
-        [[nodiscard]] WasmStore takeWasmStore();
+        [[nodiscard]] WasmStore takeWasmStore() noexcept;
 
         ////////////////////////////////////////////////////////////////
         // Parsing
@@ -1588,20 +1650,7 @@ namespace ts
 #endif
 
             TSTree               *raw_old_tree = details::get_raw<Tree, TSTree>(old_tree);
-            const TSParseOptions *raw_options  = nullptr;
-
-            TSParseOptions c_options;
-#if TS_HAS_CXX17
-            if (options.has_value())
-            {
-                c_options = static_cast<TSParseOptions>(options->get());
-#else
-            if (options)
-            {
-                c_options = static_cast<TSParseOptions>(*options);
-#endif
-                raw_options = &c_options;
-            }
+            const TSParseOptions *raw_options  = details::get_raw<const ParseOptions, const TSParseOptions>(options);
 
             TSTree *new_tree = nullptr;
             if (raw_options)
@@ -1623,6 +1672,11 @@ namespace ts
 
         [[nodiscard]] Tree parseString(details::StringViewParameter buffer, details::OptionalParam<Tree> old_tree = {})
         {
+            if (buffer.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input buffer exceeds maximum size of 4GB");
+            }
+
             TSTree *raw_old_tree = details::get_raw<Tree, TSTree>(old_tree);
 
             return Tree{
@@ -1634,6 +1688,11 @@ namespace ts
                                               InputEncoding                encoding,
                                               details::OptionalParam<Tree> old_tree = {})
         {
+            if (buffer.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input buffer exceeds maximum size of 4GB");
+            }
+
             TSTree *raw_old_tree = details::get_raw<Tree, TSTree>(old_tree);
 
             return Tree{ ts_parser_parse_string_encoding(impl.get(),
@@ -1721,7 +1780,7 @@ namespace ts
             ts_parser_set_logger(impl.get(), ts_logger);
         }
 
-        void removeLogger()
+        void removeLogger() noexcept
         {
             current_logger = nullptr;
             ts_parser_set_logger(impl.get(), { nullptr, nullptr });
@@ -1732,7 +1791,7 @@ namespace ts
         ////////////////////////////////////////////////////////////////
 
         // Does not remove logger
-        void reset()
+        void reset() noexcept
         {
             ts_parser_reset(impl.get());
         }
@@ -1754,10 +1813,10 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        TreeCursor(TSNode node) : impl{ ts_tree_cursor_new(node) }
+        explicit TreeCursor(TSNode node) noexcept : impl{ ts_tree_cursor_new(node) }
         {}
 
-        TreeCursor(const TSTreeCursor &cursor) : impl{ ts_tree_cursor_copy(&cursor) }
+        TreeCursor(const TSTreeCursor &cursor) noexcept : impl{ ts_tree_cursor_copy(&cursor) }
         {}
 
         // By default avoid copies until the ergonomics are clearer.
@@ -1768,7 +1827,7 @@ namespace ts
             std::swap(impl, other.impl);
         }
 
-        ~TreeCursor()
+        ~TreeCursor() noexcept
         {
             ts_tree_cursor_delete(&impl);
         }
@@ -1777,17 +1836,17 @@ namespace ts
         // State Control
         ////////////////////////////////////////////////////////////////
 
-        void reset(Node node)
+        void reset(Node node) noexcept
         {
             ts_tree_cursor_reset(&impl, node.impl);
         }
 
-        void reset(TreeCursor &cursor)
+        void reset(TreeCursor &cursor) noexcept
         {
             ts_tree_cursor_reset_to(&impl, &cursor.impl);
         }
 
-        [[nodiscard]] TreeCursor copy() const
+        [[nodiscard]] TreeCursor copy() const noexcept
         {
             return TreeCursor(impl);
         }
@@ -1796,42 +1855,42 @@ namespace ts
         // Navigation
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool gotoParent()
+        [[nodiscard]] bool gotoParent() noexcept
         {
             return ts_tree_cursor_goto_parent(&impl);
         }
 
-        [[nodiscard]] bool gotoFirstChild()
+        [[nodiscard]] bool gotoFirstChild() noexcept
         {
             return ts_tree_cursor_goto_first_child(&impl);
         }
 
-        [[nodiscard]] bool gotoLastChild()
+        [[nodiscard]] bool gotoLastChild() noexcept
         {
             return ts_tree_cursor_goto_last_child(&impl);
         }
 
-        [[nodiscard]] bool gotoNextSibling()
+        [[nodiscard]] bool gotoNextSibling() noexcept
         {
             return ts_tree_cursor_goto_next_sibling(&impl);
         }
 
-        [[nodiscard]] bool gotoPreviousSibling()
+        [[nodiscard]] bool gotoPreviousSibling() noexcept
         {
             return ts_tree_cursor_goto_previous_sibling(&impl);
         }
 
-        [[nodiscard]] int64_t gotoFirstChildForByte(uint32_t byte)
+        [[nodiscard]] int64_t gotoFirstChildForByte(uint32_t byte) noexcept
         {
             return ts_tree_cursor_goto_first_child_for_byte(&impl, byte);
         }
 
-        [[nodiscard]] int64_t gotoFirstChildForPoint(Point point)
+        [[nodiscard]] int64_t gotoFirstChildForPoint(Point point) noexcept
         {
             return ts_tree_cursor_goto_first_child_for_point(&impl, point);
         }
 
-        void gotoDescendant(uint32_t descendant_index)
+        void gotoDescendant(uint32_t descendant_index) noexcept
         {
             ts_tree_cursor_goto_descendant(&impl, descendant_index);
         }
@@ -1840,7 +1899,7 @@ namespace ts
         // Current Node Attributes
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Node getCurrentNode() const
+        [[nodiscard]] Node getCurrentNode() const noexcept
         {
             return Node{ ts_tree_cursor_current_node(&impl) };
         }
@@ -1850,17 +1909,17 @@ namespace ts
             return details::make_view(ts_tree_cursor_current_field_name(&impl));
         }
 
-        [[nodiscard]] FieldID getCurrentFieldID() const
+        [[nodiscard]] FieldID getCurrentFieldID() const noexcept
         {
             return ts_tree_cursor_current_field_id(&impl);
         }
 
-        [[nodiscard]] uint32_t getCurrentDescendantIndex() const
+        [[nodiscard]] uint32_t getCurrentDescendantIndex() const noexcept
         {
             return ts_tree_cursor_current_descendant_index(&impl);
         }
 
-        [[nodiscard]] uint32_t getDepthFromOrigin() const
+        [[nodiscard]] uint32_t getDepthFromOrigin() const noexcept
         {
             return ts_tree_cursor_current_depth(&impl);
         }
@@ -1871,7 +1930,7 @@ namespace ts
 
         TreeCursor &operator=(const TreeCursor &other) = delete;
 
-        TreeCursor &operator=(TreeCursor &&other)
+        TreeCursor &operator=(TreeCursor &&other) noexcept
         {
             std::swap(impl, other.impl);
             return *this;
@@ -1883,9 +1942,9 @@ namespace ts
 
     // To avoid cyclic dependencies and ODR violations, we define all methods
     // *using* TreeCursors inline after the definition of TreeCursor itself.
-    [[nodiscard]] inline TreeCursor Node::getCursor() const
+    [[nodiscard]] inline TreeCursor Node::getCursor() const noexcept
     {
-        return TreeCursor{ impl };
+        return TreeCursor(impl);
     }
 
     /////////////////////////////////////////////////////////////////////////////
@@ -1899,7 +1958,7 @@ namespace ts
         uint32_t index;
 
         // For easy conversion from C API
-        explicit QueryCapture(const TSQueryCapture &capture) : node(capture.node), index(capture.index)
+        QueryCapture(const TSQueryCapture &capture) noexcept : node(capture.node), index(capture.index)
         {}
     };
 
@@ -1917,16 +1976,12 @@ namespace ts
         // instantiated.
         std::vector<QueryCapture> captures;
 
-        QueryMatch() : id(0), pattern_index(0)
+        QueryMatch() noexcept : id(0), pattern_index(0)
         {}
 
         explicit QueryMatch(const TSQueryMatch &match) : id(match.id), pattern_index(match.pattern_index)
         {
-            captures.reserve(match.capture_count);
-            for (uint32_t i = 0; i < match.capture_count; ++i)
-            {
-                captures.emplace_back(match.captures[i]);
-            }
+            captures.assign(match.captures, match.captures + match.capture_count);
         }
     };
 
@@ -1939,10 +1994,12 @@ namespace ts
     {
         uint32_t current_byte_offset;
 
-        explicit QueryCursorState(const TSQueryCursorState *state) : current_byte_offset(state->current_byte_offset)
+        explicit QueryCursorState(const TSQueryCursorState *state) noexcept
+            : current_byte_offset(state->current_byte_offset)
         {}
 
-        explicit QueryCursorState(const TSQueryCursorState &state) : current_byte_offset(state.current_byte_offset)
+        explicit QueryCursorState(const TSQueryCursorState &state) noexcept
+            : current_byte_offset(state.current_byte_offset)
         {}
     };
 
@@ -1951,34 +2008,7 @@ namespace ts
     // Configuration options for a query cursor, such as progress callbacks.
     /////////////////////////////////////////////////////////////////////////////
 
-    struct QueryCursorOptions
-    {
-        using ProgressCallbackFunction = std::function<bool(QueryCursorState *)>;
-
-        ProgressCallbackFunction progress_callback;
-
-        static bool progress_callback_proxy(TSQueryCursorState *state)
-        {
-            if (state && state->payload)
-            {
-                auto *self = static_cast<QueryCursorOptions *>(state->payload);
-                if (self->progress_callback)
-                {
-                    QueryCursorState cpp_state(state);
-                    return self->progress_callback(&cpp_state);
-                }
-            }
-            return false;
-        }
-
-        operator TSQueryCursorOptions() const
-        {
-            TSQueryCursorOptions options{};
-            options.payload           = const_cast<QueryCursorOptions *>(this);
-            options.progress_callback = (progress_callback) ? progress_callback_proxy : nullptr;
-            return options;
-        }
-    };
+    using QueryCursorOptions = details::OptionsBase<TSQueryCursorOptions, TSQueryCursorState, QueryCursorState>;
 
     /////////////////////////////////////////////////////////////////////////////
     // QueryPredicateStep
@@ -1990,11 +2020,11 @@ namespace ts
         QueryPredicateStepType type;
         uint32_t               value_id;
 
-        QueryPredicateStep(const TSQueryPredicateStep *predicate_step)
+        QueryPredicateStep(const TSQueryPredicateStep *predicate_step) noexcept
             : type(static_cast<QueryPredicateStepType>(predicate_step->type)), value_id(predicate_step->value_id)
         {}
 
-        QueryPredicateStep(const TSQueryPredicateStep &predicate_step)
+        QueryPredicateStep(const TSQueryPredicateStep &predicate_step) noexcept
             : type(static_cast<QueryPredicateStepType>(predicate_step.type)), value_id(predicate_step.value_id)
         {}
     };
@@ -2013,6 +2043,11 @@ namespace ts
 
         Query(Language language, details::StringViewParameter source)
         {
+            if (source.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input source exceeds maximum size of 4GB");
+            }
+
             uint32_t     error_offset;
             TSQueryError error_type;
 
@@ -2036,17 +2071,17 @@ namespace ts
         // Counts
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] uint32_t getPatternCount() const
+        [[nodiscard]] uint32_t getPatternCount() const noexcept
         {
             return ts_query_pattern_count(impl.get());
         }
 
-        [[nodiscard]] uint32_t getCaptureCount() const
+        [[nodiscard]] uint32_t getCaptureCount() const noexcept
         {
             return ts_query_capture_count(impl.get());
         }
 
-        [[nodiscard]] uint32_t getStringCount() const
+        [[nodiscard]] uint32_t getStringCount() const noexcept
         {
             return ts_query_string_count(impl.get());
         }
@@ -2055,22 +2090,22 @@ namespace ts
         // Pattern Information
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool isPatternRooted(uint32_t pattern_index) const
+        [[nodiscard]] bool isPatternRooted(uint32_t pattern_index) const noexcept
         {
             return ts_query_is_pattern_rooted(impl.get(), pattern_index);
         }
 
-        [[nodiscard]] bool isPatternNonLocal(uint32_t pattern_index) const
+        [[nodiscard]] bool isPatternNonLocal(uint32_t pattern_index) const noexcept
         {
             return ts_query_is_pattern_non_local(impl.get(), pattern_index);
         }
 
-        [[nodiscard]] bool isPatternGuaranteedAtStep(uint32_t byte_offset) const
+        [[nodiscard]] bool isPatternGuaranteedAtStep(uint32_t byte_offset) const noexcept
         {
             return ts_query_is_pattern_guaranteed_at_step(impl.get(), byte_offset);
         }
 
-        [[nodiscard]] Extent<uint32_t> getByteRangeForPattern(uint32_t pattern_index) const
+        [[nodiscard]] Extent<uint32_t> getByteRangeForPattern(uint32_t pattern_index) const noexcept
         {
             return { ts_query_start_byte_for_pattern(impl.get(), pattern_index),
                      ts_query_end_byte_for_pattern(impl.get(), pattern_index) };
@@ -2111,7 +2146,8 @@ namespace ts
             return details::make_view(name, length);
         }
 
-        [[nodiscard]] Quantifier getCaptureQuantifierForID(uint32_t pattern_index, uint32_t capture_index) const
+        [[nodiscard]] Quantifier getCaptureQuantifierForID(uint32_t pattern_index,
+                                                           uint32_t capture_index) const noexcept
         {
             return static_cast<Quantifier>(
                     ts_query_capture_quantifier_for_id(impl.get(), pattern_index, capture_index));
@@ -2130,10 +2166,15 @@ namespace ts
 
         void disableCapture(details::StringViewParameter name) const
         {
+            if (name.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input name exceeds maximum size of 4GB");
+            }
+
             ts_query_disable_capture(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
         }
 
-        void disablePattern(uint32_t pattern_index) const
+        void disablePattern(uint32_t pattern_index) const noexcept
         {
             ts_query_disable_pattern(impl.get(), pattern_index);
         }
@@ -2142,7 +2183,7 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] operator const TSQuery *() const
+        [[nodiscard]] operator const TSQuery *() const noexcept
         {
             return impl.get();
         }
@@ -2163,40 +2204,39 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        QueryCursor() : impl{ ts_query_cursor_new(), ts_query_cursor_delete }
+        QueryCursor() noexcept : impl{ ts_query_cursor_new(), ts_query_cursor_delete }
         {}
 
         // In C API QueryCursor don't have copy function
-        QueryCursor(const QueryCursor &)            = delete;
-        QueryCursor &operator=(const QueryCursor &) = delete;
-        QueryCursor(QueryCursor &&)                 = default;
-        QueryCursor &operator=(QueryCursor &&)      = default;
+        QueryCursor(const QueryCursor &)     = delete;
+        QueryCursor(QueryCursor &&) noexcept = default;
+
 
         ////////////////////////////////////////////////////////////////
         // Limits
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] uint32_t getMatchLimit()
+        [[nodiscard]] uint32_t getMatchLimit() noexcept
         {
             return ts_query_cursor_match_limit(impl.get());
         }
 
-        void setMatchLimit(uint32_t limit)
+        void setMatchLimit(uint32_t limit) noexcept
         {
             ts_query_cursor_set_match_limit(impl.get(), limit);
         }
 
-        [[nodiscard]] bool didExceedMatchLimit()
+        [[nodiscard]] bool didExceedMatchLimit() noexcept
         {
             return ts_query_cursor_did_exceed_match_limit(impl.get());
         }
 
-        void setMaxStartDepth(uint32_t max_start_depth)
+        void setMaxStartDepth(uint32_t max_start_depth) noexcept
         {
             ts_query_cursor_set_max_start_depth(impl.get(), max_start_depth);
         }
 
-        void resetMaxStartDepth()
+        void resetMaxStartDepth() noexcept
         {
             ts_query_cursor_set_max_start_depth(impl.get(), std::numeric_limits<uint32_t>::max());
         }
@@ -2205,22 +2245,22 @@ namespace ts
         // Ranges
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool setByteRange(Extent<uint32_t> range)
+        [[nodiscard]] bool setByteRange(Extent<uint32_t> range) noexcept
         {
             return ts_query_cursor_set_byte_range(impl.get(), range.start, range.end);
         }
 
-        [[nodiscard]] bool setPointRange(Extent<Point> range)
+        [[nodiscard]] bool setPointRange(Extent<Point> range) noexcept
         {
             return ts_query_cursor_set_point_range(impl.get(), range.start, range.end);
         }
 
-        [[nodiscard]] bool setContainingByteRange(Extent<uint32_t> range)
+        [[nodiscard]] bool setContainingByteRange(Extent<uint32_t> range) noexcept
         {
             return ts_query_cursor_set_containing_byte_range(impl.get(), range.start, range.end);
         }
 
-        [[nodiscard]] bool setContainingPointRange(Extent<Point> range)
+        [[nodiscard]] bool setContainingPointRange(Extent<Point> range) noexcept
         {
             return ts_query_cursor_set_containing_point_range(impl.get(), range.start, range.end);
         }
@@ -2231,20 +2271,8 @@ namespace ts
 
         void exec(const Query &query, Node node, details::OptionalParam<const QueryCursorOptions> query_options = {})
         {
-            const TSQueryCursorOptions *raw_options = nullptr;
-
-            TSQueryCursorOptions c_options;
-#if TS_HAS_CXX17
-            if (query_options.has_value())
-            {
-                c_options = static_cast<TSQueryCursorOptions>(query_options->get());
-#else
-            if (query_options)
-            {
-                c_options = static_cast<TSQueryCursorOptions>(*query_options);
-#endif
-                raw_options = &c_options;
-            }
+            const TSQueryCursorOptions *
+                    raw_options = details::get_raw<const QueryCursorOptions, const TSQueryCursorOptions>(query_options);
 
             if (raw_options)
             {
@@ -2260,7 +2288,7 @@ namespace ts
         // Iteration
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool nextMatch(QueryMatch &match)
+        [[nodiscard]] bool nextMatch(QueryMatch &match) noexcept
         {
             TSQueryMatch c_match{};
             if (ts_query_cursor_next_match(impl.get(), &c_match))
@@ -2271,7 +2299,7 @@ namespace ts
             return false;
         }
 
-        [[nodiscard]] bool nextCapture(QueryMatch &match, uint32_t &capture_index)
+        [[nodiscard]] bool nextCapture(QueryMatch &match, uint32_t &capture_index) noexcept
         {
             TSQueryMatch c_match{};
             uint32_t     c_capture_index = 0;
@@ -2285,10 +2313,18 @@ namespace ts
             return false;
         }
 
-        void removeMatch(uint32_t match_id)
+        void removeMatch(uint32_t match_id) noexcept
         {
             return ts_query_cursor_remove_match(impl.get(), match_id);
         }
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        // In C API QueryCursor don't have copy function
+        QueryCursor &operator=(const QueryCursor &)     = delete;
+        QueryCursor &operator=(QueryCursor &&) noexcept = default;
 
     private:
         std::unique_ptr<TSQueryCursor, decltype(&ts_query_cursor_delete)> impl;
@@ -2316,22 +2352,19 @@ namespace ts
         }
 
         // Copying is not supported by the underlying C API.
-        LookaheadIterator(const LookaheadIterator &)            = delete;
-        LookaheadIterator &operator=(const LookaheadIterator &) = delete;
-
-        LookaheadIterator(LookaheadIterator &&other) noexcept            = default;
-        LookaheadIterator &operator=(LookaheadIterator &&other) noexcept = default;
+        LookaheadIterator(const LookaheadIterator &)          = delete;
+        LookaheadIterator(LookaheadIterator &&other) noexcept = default;
 
         ////////////////////////////////////////////////////////////////
         // State Control
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool resetState(StateID state)
+        [[nodiscard]] bool resetState(StateID state) noexcept
         {
             return ts_lookahead_iterator_reset_state(impl.get(), state);
         }
 
-        [[nodiscard]] bool reset(Language language, StateID state)
+        [[nodiscard]] bool reset(Language language, StateID state) noexcept
         {
             return ts_lookahead_iterator_reset(impl.get(), language, state);
         }
@@ -2340,12 +2373,12 @@ namespace ts
         // Property Accessors
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] Language getLanguage() const
+        [[nodiscard]] Language getLanguage() const noexcept
         {
             return Language{ ts_lookahead_iterator_language(impl.get()) };
         }
 
-        [[nodiscard]] Symbol getCurrentSymbol() const
+        [[nodiscard]] Symbol getCurrentSymbol() const noexcept
         {
             return ts_lookahead_iterator_current_symbol(impl.get());
         }
@@ -2359,7 +2392,7 @@ namespace ts
         // Navigation
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool next()
+        [[nodiscard]] bool next() noexcept
         {
             return ts_lookahead_iterator_next(impl.get());
         }
@@ -2368,7 +2401,10 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] operator const TSLookaheadIterator *() const
+        LookaheadIterator &operator=(const LookaheadIterator &)          = delete;
+        LookaheadIterator &operator=(LookaheadIterator &&other) noexcept = default;
+
+        [[nodiscard]] operator const TSLookaheadIterator *() const noexcept
         {
             return impl.get();
         }
@@ -2408,13 +2444,12 @@ namespace ts
             impl.reset(store);
         }
 
-        explicit WasmStore(TSWasmStore *store) : impl{ store, ts_wasm_store_delete }
+        explicit WasmStore(TSWasmStore *store) noexcept : impl{ store, ts_wasm_store_delete }
         {}
 
-        WasmStore(const WasmStore &)                = delete;
-        WasmStore &operator=(const WasmStore &)     = delete;
-        WasmStore(WasmStore &&) noexcept            = default;
-        WasmStore &operator=(WasmStore &&) noexcept = default;
+        WasmStore(const WasmStore &)     = delete;
+        WasmStore(WasmStore &&) noexcept = default;
+
 
         //////////////////////////////////////////////////////////////
         // Methods
@@ -2422,6 +2457,11 @@ namespace ts
 
         [[nodiscard]] Language loadLanguage(details::StringViewParameter name, details::StringViewParameter wasm_buffer)
         {
+            if (wasm_buffer.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input wasm_buffer exceeds maximum size of 4GB");
+            }
+
             TSWasmError       error{ TSWasmErrorKindNone, nullptr };
             const TSLanguage *lang = ts_wasm_store_load_language(impl.get(),
                                                                  name.data(),
@@ -2433,16 +2473,19 @@ namespace ts
             return Language{ lang };
         }
 
-        [[nodiscard]] size_t getLanguageCount() const
+        [[nodiscard]] size_t getLanguageCount() const noexcept
         {
             return ts_wasm_store_language_count(impl.get());
         }
 
         //////////////////////////////////////////////////////////////
-        // Converters
+        // Operators
         //////////////////////////////////////////////////////////////
 
-        [[nodiscard]] operator TSWasmStore *() const
+        WasmStore &operator=(const WasmStore &)     = delete;
+        WasmStore &operator=(WasmStore &&) noexcept = default;
+
+        [[nodiscard]] operator TSWasmStore *() const noexcept
         {
             return impl.get();
         }
@@ -2451,12 +2494,12 @@ namespace ts
         std::unique_ptr<TSWasmStore, decltype(&ts_wasm_store_delete)> impl{ nullptr, ts_wasm_store_delete };
     };
 
-    inline void Parser::setWasmStore(WasmStore &store)
+    [[nodiscard]] inline void Parser::setWasmStore(WasmStore &store) noexcept
     {
         ts_parser_set_wasm_store(impl.get(), store);
     }
 
-    [[nodiscard]] inline WasmStore Parser::takeWasmStore()
+    [[nodiscard]] inline WasmStore Parser::takeWasmStore() noexcept
     {
         TSWasmStore *raw_store = ts_parser_take_wasm_store(impl.get());
         return WasmStore{ raw_store };
@@ -2485,14 +2528,15 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        explicit ChildIterator(const ts::Node &node) : cursor{ node.getCursor() }, atEnd{ !cursor.gotoFirstChild() }
+        explicit ChildIterator(const ts::Node &node) noexcept
+            : cursor{ node.getCursor() }, atEnd{ !cursor.gotoFirstChild() }
         {}
 
         ////////////////////////////////////////////////////////////////
         // Get
         ////////////////////////////////////////////////////////////////
 
-        value_type operator*() const
+        value_type operator*() const noexcept
         {
             return cursor.getCurrentNode();
         }
@@ -2501,13 +2545,13 @@ namespace ts
         // Advance
         ////////////////////////////////////////////////////////////////
 
-        ChildIterator &operator++()
+        ChildIterator &operator++() noexcept
         {
             atEnd = !cursor.gotoNextSibling();
             return *this;
         }
 
-        ChildIterator &operator++(int)
+        ChildIterator &operator++(int) noexcept
         {
             atEnd = !cursor.gotoNextSibling();
             return *this;
@@ -2517,22 +2561,22 @@ namespace ts
         // Comparision
         ////////////////////////////////////////////////////////////////
 
-        friend bool operator==(const ChildIterator &a, const ChildIteratorSentinel &)
+        friend bool operator==(const ChildIterator &a, const ChildIteratorSentinel &) noexcept
         {
             return a.atEnd;
         }
 
-        friend bool operator!=(const ChildIterator &a, const ChildIteratorSentinel &b)
+        friend bool operator!=(const ChildIterator &a, const ChildIteratorSentinel &b) noexcept
         {
             return !(a == b);
         }
 
-        friend bool operator==(const ChildIteratorSentinel &b, const ChildIterator &a)
+        friend bool operator==(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
         {
             return a == b;
         }
 
-        friend bool operator!=(const ChildIteratorSentinel &b, const ChildIterator &a)
+        friend bool operator!=(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
         {
             return a != b;
         }
@@ -2547,12 +2591,12 @@ namespace ts
         using iterator = ChildIterator;
         using sentinel = ChildIteratorSentinel;
 
-        auto begin() const -> iterator
+        auto begin() const noexcept -> iterator
         {
             return ChildIterator{ node };
         }
 
-        auto end() const -> sentinel
+        auto end() const noexcept -> sentinel
         {
             return {};
         }
@@ -2600,8 +2644,8 @@ template <typename F>
             return;
         }
 
-        TreeCursor   cursor      = root.getCursor();
-        const size_t start_depth = cursor.getDepthFromOrigin();
+        TreeCursor     cursor      = root.getCursor();
+        const uint32_t start_depth = cursor.getDepthFromOrigin();
 
         while (true)
         {

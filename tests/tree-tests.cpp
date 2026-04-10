@@ -1,9 +1,13 @@
 #include "pch.hpp"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+// cpp-tree-sitter
 #include <cpp-tree-sitter.hpp>
 
+// Catch2
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
+
+// STL
 #include <algorithm>
 #include <cstdio>
 #include <fstream>

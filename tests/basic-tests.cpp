@@ -1,8 +1,14 @@
 #include "pch.hpp"
 
+// cpp-tree-sitter
+#include <cpp-tree-sitter.hpp>
+
+// Catch2
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
-#include <cpp-tree-sitter.hpp>
+
+// STL
+#include <cstdint>
 
 extern "C" const TSLanguage *tree_sitter_json();
 

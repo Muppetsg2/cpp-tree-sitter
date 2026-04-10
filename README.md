@@ -114,6 +114,7 @@ The library now features a custom `StringView` for C++11/14 environments and det
 |    **Queries**   |        No        |             Yes (Full API)            |
 | **Wasm Support** |        No        |                  Yes                  |
 |  **RAII Scope**  |      Partial     |  Complete (Tree, Parser, Query, etc.) |
+|  **Unit Tests**  |        No        |                  Yes                  |
 
 
 ## License
