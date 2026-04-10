@@ -1,11 +1,15 @@
 # Change this value to test with different c++ versions
-set(TEST_CXX_STANDARD 20 CACHE STRING "C++ standard for tests" FORCE)
+set(CPP_TS_TEST_CXX_STANDARD 20 CACHE STRING "C++ standard for tests" FORCE)
 
 set(PCH_FILE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp)
 set(TARGET_NAME ${PROJECT_NAME}-tests)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 file(GLOB_RECURSE TESTS_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+
+if(NOT CPP_TS_FEATURE_WASM)
+    list(REMOVE_ITEM TESTS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/wasm-tests.cpp")
+endif()
 
 enable_testing()
 
@@ -16,10 +20,10 @@ target_precompile_headers(${TARGET_NAME} PUBLIC ${PCH_FILE})
 set_target_properties(${TARGET_NAME} PROPERTIES 
     LINKER_LANGUAGE CXX
     CXX_STANDARD_REQUIRED ON
-    CXX_STANDARD ${TEST_CXX_STANDARD}
+    CXX_STANDARD ${CPP_TS_TEST_CXX_STANDARD}
 )
 
-# target_compile_features(${TARGET_NAME} PRIVATE cxx_std_${TEST_CXX_STANDARD})
+# target_compile_features(${TARGET_NAME} PRIVATE cxx_std_${CPP_TS_TEST_CXX_STANDARD})
 
 target_include_directories(${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -34,11 +38,13 @@ elseif(UNIX)
     target_compile_definitions(${TARGET_NAME} PRIVATE __linux__)
 endif()
 
-add_grammar(
+cpp_ts_add_grammar(
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
     VERSION 0.24.8
 )
+
+cpp_ts_copy_wasmtime(TARGET ${TARGET_NAME})
 
 CPMAddPackage(
     URI "gh:catchorg/Catch2@3.14.0"
@@ -48,6 +54,20 @@ CPMAddPackage(
 
 if(Catch2_ADDED)
     set(Catch2_Extras ${Catch2_SOURCE_DIR}/extras CACHE INTERNAL "")
+
+    find_and_copy_lib(
+        TARGET ${TARGET_NAME}
+        NAMES "$<$<CONFIG:Debug>:Catch2d.dll>$<$<NOT:$<CONFIG:Debug>>:Catch2.dll>"
+        PATHS ${Catch2_BINARY_DIR}/src
+        POST_BUILD
+    )
+
+    find_and_copy_lib(
+        TARGET ${TARGET_NAME}
+        NAMES "$<$<CONFIG:Debug>:Catch2Maind.dll>$<$<NOT:$<CONFIG:Debug>>:Catch2Main.dll>"
+        PATHS ${Catch2_BINARY_DIR}/src
+        POST_BUILD
+    )
 endif()
 
 target_compile_options(${TARGET_NAME} PRIVATE
@@ -81,6 +101,11 @@ if(MSVC)
     target_compile_definitions(${TARGET_NAME} PRIVATE NOMINMAX)
 endif()
 
+if(CPP_TS_FEATURE_WASM)
+    target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_FEATURE_WASM)
+    target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_WASM_FILES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/wasm")
+endif()
+
 target_link_libraries(${TARGET_NAME} PRIVATE 
 	${PROJECT_NAME}
     tree-sitter-json
@@ -92,7 +117,7 @@ include(CTest)
 include(Catch)
 catch_discover_tests(
 	${TARGET_NAME}
-	DISCOVERY_MODE POST_BUILD
+	DISCOVERY_MODE PRE_TEST
 )
 
 if(MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")

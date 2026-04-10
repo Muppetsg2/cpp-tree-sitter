@@ -957,9 +957,9 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
-        Language &operator=(Language other) noexcept
+        Language &operator=(const Language &other) noexcept
         {
-            std::swap(impl, other.impl);
+            impl = { ts_language_copy(other.impl.get()), [](const TSLanguage *l) { ts_language_delete(l); } };
             return *this;
         }
 
@@ -1538,6 +1538,9 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
+        Parser() : impl{ ts_parser_new(), ts_parser_delete }
+        {}
+
         Parser(Language language) : impl{ ts_parser_new(), ts_parser_delete }
         {
             if (!setLanguage(language))
@@ -1552,7 +1555,8 @@ namespace ts
 
         [[nodiscard]] bool setLanguage(Language language) noexcept
         {
-            return ts_parser_set_language(impl.get(), language);
+            has_language = ts_parser_set_language(impl.get(), language);
+            return has_language;
         }
 
         [[nodiscard]] bool setIncludedRanges(const std::vector<Range> &ranges)
@@ -1643,6 +1647,11 @@ namespace ts
                                  details::OptionalParam<Tree>               old_tree = {},
                                  details::OptionalParam<const ParseOptions> options  = {})
         {
+            if (!has_language)
+            {
+                throw std::logic_error("Tree-sitter: Cannot parse without a language. Use setLanguage() first.");
+            }
+
 #if TS_HAS_CXX17
             Input::current_input_ptr = &input;
 #else
@@ -1672,6 +1681,11 @@ namespace ts
 
         [[nodiscard]] Tree parseString(details::StringViewParameter buffer, details::OptionalParam<Tree> old_tree = {})
         {
+            if (!has_language)
+            {
+                throw std::logic_error("Tree-sitter: Cannot parse without a language. Use setLanguage() first.");
+            }
+
             if (buffer.size() > std::numeric_limits<uint32_t>::max())
             {
                 throw std::length_error("Tree-sitter: Input buffer exceeds maximum size of 4GB");
@@ -1688,6 +1702,11 @@ namespace ts
                                               InputEncoding                encoding,
                                               details::OptionalParam<Tree> old_tree = {})
         {
+            if (!has_language)
+            {
+                throw std::logic_error("Tree-sitter: Cannot parse without a language. Use setLanguage() first.");
+            }
+
             if (buffer.size() > std::numeric_limits<uint32_t>::max())
             {
                 throw std::length_error("Tree-sitter: Input buffer exceeds maximum size of 4GB");
@@ -1799,6 +1818,7 @@ namespace ts
     private:
         std::unique_ptr<TSParser, decltype(&ts_parser_delete)> impl;
         std::function<void(LogType, const char *)>             current_logger;
+        bool                                                   has_language = false;
     };
 
     /////////////////////////////////////////////////////////////////////////////

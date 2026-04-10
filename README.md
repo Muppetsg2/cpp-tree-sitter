@@ -37,19 +37,19 @@ CPMAddPackage(
 )
 
 # Download a grammar (e.g., JSON) and make it a CMake target
-add_grammar(
+cpp_ts_add_grammar(
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
     VERSION 0.24.8
 )
 
 # or if you have grammar downloaded you can specify location using:
-# add_grammar(
+# cpp_ts_add_grammar(
 #     NAME tree-sitter-json
 #     SOURCE_DIR path/to/dir/tree-sitter-json
 # )
 #
-# or set TREE_SITTER_GRAMMAR_PATH before downloading cpp-tree-sitter
+# or set CPP_TS_GRAMMAR_PATH before downloading cpp-tree-sitter
 
 add_executable(demo main.cpp)
 target_link_libraries(demo PRIVATE cpp-tree-sitter tree-sitter-json)
