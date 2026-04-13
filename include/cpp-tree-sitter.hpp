@@ -7,7 +7,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
+#include <ios>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -29,6 +31,7 @@
 #define TS_HAS_CXX20 (TS_CXX_LEVEL >= 202002L)
 
 #if TS_HAS_CXX17
+#include <filesystem>
 #include <optional>
 #include <string_view>
 #include <type_traits>
@@ -253,6 +256,11 @@ namespace ts
         {
             return opt.has_value() ? static_cast<Raw *>(opt->get()) : nullptr;
         }
+
+        [[nodiscard]] static StringViewReturn get_filename(StringViewParameter path)
+        {
+            return StringViewReturn(std::filesystem::path(path).stem().string());
+        }
 #else
         using StringViewParameter = const StringView;
         using StringViewReturn    = StringView;
@@ -264,6 +272,18 @@ namespace ts
         [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
         {
             return opt ? static_cast<Raw *>(*opt) : nullptr;
+        }
+
+        [[nodiscard]] static StringViewReturn get_filename(StringViewParameter path)
+        {
+            std::string filename = std::string(path);
+            size_t      slash    = filename.find_last_of("/\\");
+            size_t      dot      = filename.find_last_of('.');
+
+            size_t start = (slash == std::string::npos) ? 0 : slash + 1;
+            size_t end   = (dot == std::string::npos || dot < start) ? filename.length() : dot;
+
+            return StringViewReturn(filename.substr(start, end - start));
         }
 #endif
 
@@ -420,18 +440,18 @@ namespace ts
 #if TS_HAS_CXX17
                 if constexpr (std::is_same_v<T, LookaheadIterator>)
 #else
-                if (std::is_same_v<T, LookaheadIterator>)
+                if (std::is_same<T, LookaheadIterator>::value)
 #endif
                 {
-                    ts_lookahead_iterator_delete(raw_pointer);
+                    ts_lookahead_iterator_delete(static_cast<TSLookaheadIterator *>(raw_pointer));
                 }
 #if TS_HAS_CXX17
                 else if constexpr (std::is_same_v<T, QueryCursor>)
 #else
-                else if (std::is_same_v<T, QueryCursor>)
+                else if (std::is_same<T, QueryCursor>::value)
 #endif
                 {
-                    ts_query_cursor_delete(raw_pointer);
+                    ts_query_cursor_delete(static_cast<QueryCursor *>(raw_pointer));
                 }
                 else
                 {
@@ -2819,6 +2839,33 @@ namespace ts
             return Language{ lang };
         }
 
+        [[nodiscard]] Language loadLanguage(details::StringViewParameter file_path)
+        {
+            if (!is_valid)
+            {
+                throw std::length_error("Tree-sitter: Wasm Store is invalid");
+            }
+
+            if (file_path.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input file_path exceeds maximum size of 4GB");
+            }
+
+            const std::string path = std::string(file_path);
+            std::ifstream     file(path, std::ios::binary | std::ios::ate);
+            if (!file.is_open())
+            {
+                throw std::runtime_error("Tree-sitter: Failed to open wasm file: " + path);
+            }
+            std::streamsize size = file.tellg();
+            file.seekg(0, std::ios::beg);
+            std::vector<uint8_t> buffer(size);
+            file.read(reinterpret_cast<char *>(buffer.data()), size);
+
+            return loadLanguage(details::get_filename(path),
+                                details::StringViewParameter(reinterpret_cast<char *>(buffer.data()), buffer.size()));
+        }
+
         [[nodiscard]] size_t getLanguageCount() const
         {
             if (!is_valid)
@@ -2849,16 +2896,30 @@ namespace ts
     private:
         std::unique_ptr<TSWasmStore, decltype(&ts_wasm_store_delete)> impl{ nullptr, ts_wasm_store_delete };
         bool                                                          is_valid = false;
+
+        void setInvalid()
+        {
+            impl.reset(nullptr);
+            is_valid = false;
+        }
+
+        friend class Parser;
     };
 
     [[nodiscard]] inline void Parser::setWasmStore(WasmStore &store) noexcept
     {
         ts_parser_set_wasm_store(impl.get(), store);
         wasm_store_set = true;
+        store.setInvalid();
     }
 
     [[nodiscard]] inline WasmStore Parser::takeWasmStore() noexcept
     {
+        Language current = getCurrentLanguage();
+        if (current.isValid() && current.isWasm())
+        {
+            language_set = false;
+        }
         TSWasmStore *raw_store = ts_parser_take_wasm_store(impl.get());
         wasm_store_set         = false;
         return WasmStore{ raw_store };
