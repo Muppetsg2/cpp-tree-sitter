@@ -32,7 +32,7 @@ include(cmake/CPM.cmake)
 # Download the wrapper and tree-sitter core
 CPMAddPackage(
     NAME cpp-tree-sitter
-    GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter
+    GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter.git
     GIT_TAG main
 )
 
