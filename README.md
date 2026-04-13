@@ -15,13 +15,13 @@ It provides a clean, RAII-compliant interface and CMake integrations to simplify
 
 ## Requirements
 * **Compiler:** C++11 compatible or newer (C++17/20 recommended).
-* **Build System:** [CMake](https://cmake.org/) 3.20 or newer.
+* **Build System:** [CMake](https://cmake.org/) 3.30 or newer.
 
 ## Using in a CMake Project
 The easiest way to include `cpp-tree-sitter` is via CPM. Adding this wrapper automatically makes the core `tree-sitter` library available as well.
 
 ```cmake
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.30)
 
 project(MyParser)
 

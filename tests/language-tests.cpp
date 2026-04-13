@@ -89,7 +89,7 @@ TEST_CASE("Language Deep Dive", "[language]")
         CHECK(li.getLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());
     }
 
-    SECTION("Metadata and Wasm")
+    SECTION("Metadata")
     {
 #if TEST_HAS_CXX17
         auto meta = lang.getMetadata();
@@ -101,7 +101,9 @@ TEST_CASE("Language Deep Dive", "[language]")
         ts::LanguageMetadata meta = lang.getMetadata();
 #endif
 
+#if defined(CPP_TS_TEST_FEATURE_WASM)
         CHECK_FALSE(lang.isWasm());
+#endif
     }
 }
 
