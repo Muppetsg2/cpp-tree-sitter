@@ -666,7 +666,7 @@ namespace ts
         }
     };
 
-    [[nodiscard]] inline void Point::edit(const InputEdit &edit, uint32_t &byte_offset)
+    inline void Point::edit(const InputEdit &edit, uint32_t &byte_offset)
     {
         edit.validate();
 
