@@ -94,6 +94,8 @@ This example demonstrates parsing a JSON string and using the visitor to inspect
 
 ```cpp
 #include <iostream>
+#include <string>
+#include <functional>
 #include <cpp-tree-sitter.h>
 
 // Extern declaration for the grammar function
