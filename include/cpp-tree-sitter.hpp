@@ -256,11 +256,6 @@ namespace ts
         {
             return opt.has_value() ? static_cast<Raw *>(opt->get()) : nullptr;
         }
-
-        [[nodiscard]] static StringViewReturn get_filename(StringViewParameter path)
-        {
-            return StringViewReturn(std::filesystem::path(path).stem().string());
-        }
 #else
         using StringViewParameter = const StringView;
         using StringViewReturn    = StringView;
@@ -272,18 +267,6 @@ namespace ts
         [[nodiscard]] static Raw *get_raw(OptionalParam<T> opt)
         {
             return opt ? static_cast<Raw *>(*opt) : nullptr;
-        }
-
-        [[nodiscard]] static StringViewReturn get_filename(StringViewParameter path)
-        {
-            std::string filename = std::string(path);
-            size_t      slash    = filename.find_last_of("/\\");
-            size_t      dot      = filename.find_last_of('.');
-
-            size_t start = (slash == std::string::npos) ? 0 : slash + 1;
-            size_t end   = (dot == std::string::npos || dot < start) ? filename.length() : dot;
-
-            return StringViewReturn(filename.substr(start, end - start));
         }
 #endif
 
@@ -367,6 +350,30 @@ namespace ts
                 throw std::runtime_error("Tree-sitter Wasm Error [" + std::string(kind_name) + "]: " + message);
             }
         };
+
+        [[nodiscard]] static std::string get_grammar_name_from_file(StringViewParameter path)
+        {
+#if TS_HAS_CXX17
+            std::string name = std::filesystem::path(path).stem().string();
+#else
+            std::string filename = std::string(path);
+            size_t      slash    = filename.find_last_of("/\\");
+            size_t      dot      = filename.find_last_of('.');
+
+            size_t start = (slash == std::string::npos) ? 0 : slash + 1;
+            size_t end   = (dot == std::string::npos || dot < start) ? filename.length() : dot;
+
+            std::string name = filename.substr(start, end - start);
+#endif
+            const std::string prefix = "tree-sitter-";
+
+            if (name.compare(0, prefix.length(), prefix) == 0)
+            {
+                return name.substr(prefix.length());
+            }
+
+            return name;
+        }
 #endif
 
         [[nodiscard]] inline StringViewReturn make_view(const char *str)
@@ -1884,6 +1891,22 @@ namespace ts
 #endif
 
         ////////////////////////////////////////////////////////////////
+        // Flags
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] bool hasLanguage() const noexcept
+        {
+            return language_set;
+        }
+
+#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+        [[nodiscard]] bool hasWasmStore() const noexcept
+        {
+            return wasm_store_set;
+        }
+#endif
+
+        ////////////////////////////////////////////////////////////////
         // Parsing
         ////////////////////////////////////////////////////////////////
 
@@ -2865,23 +2888,21 @@ namespace ts
                 throw std::runtime_error("Tree-sitter: Failed to open wasm file: " + path);
             }
 
+            file.seekg(0, std::ios::end);
             std::streamsize size = file.tellg();
             if (size < 0)
             {
                 throw std::runtime_error("Tree-sitter: Failed to determine file size: " + path);
             }
-
             file.seekg(0, std::ios::beg);
-            std::vector<uint8_t> buffer(static_cast<size_t>(size));
 
-            if (!file.read(reinterpret_cast<char *>(buffer.data()), size))
-            {
-                throw std::runtime_error("Tree-sitter: Failed to read wasm file: " + path);
-            }
+            std::string buffer;
+            buffer.reserve(static_cast<size_t>(size));
+            buffer.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-            return loadLanguage(
-                    details::get_filename(path),
-                    details::StringViewParameter(reinterpret_cast<const char *>(buffer.data()), buffer.size()));
+            std::string lang_name = details::get_grammar_name_from_file(path);
+
+            return loadLanguage(lang_name, buffer);
         }
 
         [[nodiscard]] size_t getLanguageCount() const
@@ -2917,7 +2938,8 @@ namespace ts
 
         void setInvalid()
         {
-            impl.reset(nullptr);
+            // We need to set impl as nullptr but don't call deleter on stored pointer
+            impl.release();
             is_valid = false;
         }
 

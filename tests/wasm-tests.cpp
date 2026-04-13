@@ -5,12 +5,11 @@
 // cpp-tree-sitter
 #include <cpp-tree-sitter.hpp>
 
-
 // wasmtime
 #if TEST_HAS_CXX17
 #include <wasmtime.hh>
 #else
-#include <wasmtime.h>
+#include <wasm.h>
 #endif
 
 // Catch2
@@ -24,16 +23,24 @@
 #include <stdexcept>
 #include <vector>
 
-extern "C" const TSLanguage *tree_sitter_json();
-
 TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 {
+#if TEST_HAS_CXX17
     // C++ Api Wasm Engine
     wasmtime::Engine engine;
+#else
+    // C Api Wasm Engine
+    wasm_engine_t *engine = wasm_engine_new();
+#endif
 
     SECTION("Successful language loading and parsing")
     {
+        // Engine will be deleted by tree-sitter
+#if TEST_HAS_CXX17
         ts::WasmStore store(engine.capi());
+#else
+        ts::WasmStore store(engine);
+#endif
 
         // Loading compilated tree-spitter-json grammar
         ts::Language json_lang{ nullptr };
@@ -46,10 +53,10 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
         // Parser test using wasm
         ts::Parser parser;
 
-        // TODO: repair bug with ts_wasm_store_delete
-        // parser.setWasmStore(store);
+        parser.setWasmStore(store);
 
-        /*
+        CHECK_FALSE(store.isValid());
+
         parser.setLanguage(json_lang);
 
         std::string code = R"({"test": 123})";
@@ -59,13 +66,18 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
         REQUIRE(tree.getRootNode().getType().compare("document") == 0);
 
         store = parser.takeWasmStore();
-        parser.setLanguage({ nullptr });
-        */
+
+        CHECK(store.isValid());
+        CHECK_FALSE(parser.hasLanguage());
     }
 
     SECTION("Error handling for invalid Wasm data")
     {
+#if TEST_HAS_CXX17
         ts::WasmStore store(engine.capi());
+#else
+        ts::WasmStore store(engine);
+#endif
 
         // Plain text. Not a binary wasm
         std::string garbage = "not a wasm file";
@@ -77,11 +89,19 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 
 TEST_CASE("WasmStore Lifecycle", "[wasm]")
 {
+#if TEST_HAS_CXX17
+    // C++ Api Wasm Engine
     wasmtime::Engine engine;
+#else
+    // C Api Wasm Engine
+    wasm_engine_t *raw_engine = wasm_engine_new();
+#endif
 
     SECTION("RAII Safety")
     {
-        auto *raw_engine = engine.capi();
+#if TEST_HAS_CXX17
+        wasm_engine_t *raw_engine = engine.capi();
+#endif
         {
             ts::WasmStore store(raw_engine);
             // WasmStore Live here

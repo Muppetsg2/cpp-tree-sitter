@@ -29,4 +29,13 @@
 
 #define TEST_HAS_CXX17 (TEST_CXX_LEVEL >= 201703L)
 #define TEST_HAS_CXX20 (TEST_CXX_LEVEL >= 202002L)
+
+#if defined(CPP_TS_TEST_FEATURE_WASM)
+// wasmtime
+#if TEST_HAS_CXX17
+#include <wasmtime.hh>
+#else
+#include <wasm.h>
+#endif
+#endif
 #endif
