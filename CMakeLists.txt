@@ -23,6 +23,14 @@ option(CPP_TS_BUILD_TESTS "Build test for cpp-tree-sitter" ${CPP_TS_BUILD_TESTS_
 option(CPP_TS_FEATURE_WASM "Enable the Wasm feature" ON)
 option(CPP_TS_AMALGAMATED "Build using an amalgamated source" ON)
 
+if(DEFINED CPP_TS_WASMTIME_PATH AND NOT CACHE{CPP_TS_WASMTIME_PATH})
+	set(CPP_TS_WASMTIME_PATH "${CPP_TS_WASMTIME_PATH}" CACHE PATH "Path to locally installed wasmtime" FORCE)
+endif()
+
+if(NOT CPP_TS_WASMTIME_PATH)
+	set(CPP_TS_WASMTIME_PATH "" CACHE PATH "Path to locally installed wasmtime")
+endif()
+
 # We want to automatically download and provide tree-sitter to users of
 # the package, so pull it in and retrofit cmake dependencies on top of it.
 CPMAddPackage(
@@ -74,26 +82,36 @@ target_compile_options(${PROJECT_NAME} INTERFACE
 )
 
 if(CPP_TS_FEATURE_WASM)
-	set(WASM_VERSION 43.0.1)
-	if(WIN32)
-		set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-windows-c-api.zip")
-	elseif(APPLE)
-		set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-macos-c-api.tar.xz")
-	elseif(UNIX)
-		set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-linux-c-api.tar.xz")
+	set(WASMTIME_INCLUDE_DIR "")
+	set(WASMTIME_LIB_DIR "")
+	if(NOT CPP_TS_WASMTIME_PATH)
+		set(WASM_VERSION 43.0.1)
+		if(WIN32)
+			set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-windows-c-api.zip")
+		elseif(APPLE)
+			set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-macos-c-api.tar.xz")
+		elseif(UNIX)
+			set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-linux-c-api.tar.xz")
+		endif()
+
+		CPMAddPackage(
+			NAME wasmtime
+			URL ${WASMTIME_URL}
+			DOWNLOAD_ONLY YES
+		)
+
+		if(wasmtime_ADDED)
+			set(WASMTIME_INCLUDE_DIR ${wasmtime_SOURCE_DIR}/include)
+			set(WASMTIME_LIB_DIR ${wasmtime_SOURCE_DIR}/lib)
+		endif()
+	else()
+		if(EXISTS "${CPP_TS_WASMTIME_PATH}")
+			set(WASMTIME_INCLUDE_DIR ${CPP_TS_WASMTIME_PATH}/include)
+			set(WASMTIME_LIB_DIR ${CPP_TS_WASMTIME_PATH}/lib)
+		endif()
 	endif()
 
-	CPMAddPackage(
-		NAME wasmtime
-		URL ${WASMTIME_URL}
-		DOWNLOAD_ONLY YES
-	)
-
-	set(WASMTIME_LIB_DIR "")
-	if(wasmtime_ADDED)
-		set(WASMTIME_INCLUDE_DIR ${wasmtime_SOURCE_DIR}/include)
-		set(WASMTIME_LIB_DIR ${wasmtime_SOURCE_DIR}/lib)
-    
+	if(WASMTIME_INCLUDE_DIR AND WASMTIME_LIB_DIR)
 		set(WASMTIME_LIB_NAME wasmtime)
 		if(NOT BUILD_SHARED_LIBS)
 			if(WIN32)
@@ -134,7 +152,7 @@ if(CPP_TS_FEATURE_WASM)
 		target_link_libraries(tree-sitter PUBLIC ${WASMTIME_LIBRARY})
 	endif()
 
-	function(cpp_ts_copy_wasmtime)
+	function(CPPTSCopyWasmtime)
 		set(options)
 		set(oneValueArgs TARGET)
 		set(multiValueArgs)
@@ -147,11 +165,13 @@ if(CPP_TS_FEATURE_WASM)
 			message(FATAL_ERROR "cpp_ts_copy_wasmtime requires TARGET")
 		endif()
 
-		find_and_copy_lib(
-			TARGET ${arg_TARGET}
-			NAMES wasmtime.dll
-			PATHS ${WASMTIME_LIB_DIR}
-		)
+		if(EXISTS "${WASMTIME_LIB_DIR}")
+			find_and_copy_lib(
+				TARGET ${arg_TARGET}
+				NAMES wasmtime.dll
+				PATHS ${WASMTIME_LIB_DIR}
+			)
+		endif()
 	endfunction()
 endif()
 

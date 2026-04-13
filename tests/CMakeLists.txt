@@ -45,7 +45,9 @@ CPPTSAddGrammar(
     FIND_ALSO_WASM_FILE
 )
 
-cpp_ts_copy_wasmtime(TARGET ${TARGET_NAME})
+if(CPP_TS_FEATURE_WASM)
+    CPPTSCopyWasmtime(TARGET ${TARGET_NAME})
+endif()
 
 CPMAddPackage(
     URI "gh:catchorg/Catch2@3.14.0"

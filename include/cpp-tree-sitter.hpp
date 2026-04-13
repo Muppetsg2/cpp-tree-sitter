@@ -437,26 +437,29 @@ namespace ts
                     return;
                 }
 
-#if TS_HAS_CXX17
-                if constexpr (std::is_same_v<T, LookaheadIterator>)
-#else
-                if (std::is_same<T, LookaheadIterator>::value)
-#endif
+                std::free(raw_pointer);
+            }
+
+            template <>
+            void operator()<TSQueryCursor>(TSQueryCursor *raw_pointer) const
+            {
+                if (raw_pointer == nullptr)
                 {
-                    ts_lookahead_iterator_delete(static_cast<TSLookaheadIterator *>(raw_pointer));
+                    return;
                 }
-#if TS_HAS_CXX17
-                else if constexpr (std::is_same_v<T, QueryCursor>)
-#else
-                else if (std::is_same<T, QueryCursor>::value)
-#endif
+
+                ts_query_cursor_delete(raw_pointer);
+            }
+
+            template <>
+            void operator()<TSLookaheadIterator>(TSLookaheadIterator *raw_pointer) const
+            {
+                if (raw_pointer == nullptr)
                 {
-                    ts_query_cursor_delete(static_cast<QueryCursor *>(raw_pointer));
+                    return;
                 }
-                else
-                {
-                    std::free(raw_pointer);
-                }
+
+                ts_lookahead_iterator_delete(raw_pointer);
             }
         };
     } // namespace details
@@ -1841,6 +1844,9 @@ namespace ts
         }
 
 #if defined(CPP_TREE_SITTER_FEATURE_WASM)
+        // Passing a WasmStore invalidates it. The parser takes control of the WasmStore. You can retrieve it using the
+        // takeWasmStore() function. If you set a new WasmStore without retrieving the previous one, the previous
+        // instance will be discarded.
         void setWasmStore(WasmStore &store) noexcept;
 #endif
 
@@ -1873,6 +1879,7 @@ namespace ts
         }
 
 #if defined(CPP_TREE_SITTER_FEATURE_WASM)
+        // If the set language is WebAssembly, it will be removed from the parser.
         [[nodiscard]] WasmStore takeWasmStore() noexcept;
 #endif
 
@@ -2851,19 +2858,30 @@ namespace ts
                 throw std::length_error("Tree-sitter: Input file_path exceeds maximum size of 4GB");
             }
 
-            const std::string path = std::string(file_path);
+            const std::string path(file_path);
             std::ifstream     file(path, std::ios::binary | std::ios::ate);
             if (!file.is_open())
             {
                 throw std::runtime_error("Tree-sitter: Failed to open wasm file: " + path);
             }
-            std::streamsize size = file.tellg();
-            file.seekg(0, std::ios::beg);
-            std::vector<uint8_t> buffer(size);
-            file.read(reinterpret_cast<char *>(buffer.data()), size);
 
-            return loadLanguage(details::get_filename(path),
-                                details::StringViewParameter(reinterpret_cast<char *>(buffer.data()), buffer.size()));
+            std::streamsize size = file.tellg();
+            if (size < 0)
+            {
+                throw std::runtime_error("Tree-sitter: Failed to determine file size: " + path);
+            }
+
+            file.seekg(0, std::ios::beg);
+            std::vector<uint8_t> buffer(static_cast<size_t>(size));
+
+            if (!file.read(reinterpret_cast<char *>(buffer.data()), size))
+            {
+                throw std::runtime_error("Tree-sitter: Failed to read wasm file: " + path);
+            }
+
+            return loadLanguage(
+                    details::get_filename(path),
+                    details::StringViewParameter(reinterpret_cast<const char *>(buffer.data()), buffer.size()));
         }
 
         [[nodiscard]] size_t getLanguageCount() const

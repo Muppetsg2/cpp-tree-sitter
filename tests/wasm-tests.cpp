@@ -5,8 +5,13 @@
 // cpp-tree-sitter
 #include <cpp-tree-sitter.hpp>
 
+
 // wasmtime
+#if TEST_HAS_CXX17
 #include <wasmtime.hh>
+#else
+#include <wasmtime.h>
+#endif
 
 // Catch2
 #include <catch2/catch_test_macros.hpp>
@@ -21,39 +26,18 @@
 
 extern "C" const TSLanguage *tree_sitter_json();
 
-using namespace wasmtime;
-
-std::vector<uint8_t> load_wasm_file(const std::string &path)
-{
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file.is_open())
-    {
-        throw std::runtime_error("Failed to open wasm file: " + path);
-    }
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    std::vector<uint8_t> buffer(size);
-    file.read(reinterpret_cast<char *>(buffer.data()), size);
-    return buffer;
-}
-
 TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 {
     // C++ Api Wasm Engine
-    Engine engine;
+    wasmtime::Engine engine;
 
     SECTION("Successful language loading and parsing")
     {
         ts::WasmStore store(engine.capi());
 
         // Loading compilated tree-spitter-json grammar
-        auto wasm_data = load_wasm_file(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
-
         ts::Language json_lang{ nullptr };
-        REQUIRE_NOTHROW(json_lang = store.loadLanguage(
-                                "json",
-                                ts::details::StringViewParameter(reinterpret_cast<char *>(wasm_data.data()),
-                                                                 wasm_data.size())));
+        REQUIRE_NOTHROW(json_lang = store.loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm"));
 
         // Loaded language tests
         REQUIRE(json_lang.isWasm());
@@ -93,7 +77,7 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 
 TEST_CASE("WasmStore Lifecycle", "[wasm]")
 {
-    Engine engine;
+    wasmtime::Engine engine;
 
     SECTION("RAII Safety")
     {
