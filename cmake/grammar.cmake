@@ -58,7 +58,7 @@ function(cpp_ts_url_without_git REPO_URL RESULT)
     )
 endfunction()
 
-function(cpp_ts_add_grammar)
+function(CPPTSAddGrammar)
     set(options NOT_IN_GLOBAL_DIR FIND_ALSO_WASM_FILE FIND_ONLY_WASM_FILE)  # Bool Options
     set(oneValueArgs NAME GIT_REPOSITORY VERSION GIT_TAG SOURCE_DIR)        # One element arguments
     set(multiValueArgs)                             	  			        # No multi-value arguments

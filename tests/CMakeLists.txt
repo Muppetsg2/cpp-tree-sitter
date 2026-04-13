@@ -38,7 +38,7 @@ elseif(UNIX)
     target_compile_definitions(${TARGET_NAME} PRIVATE __linux__)
 endif()
 
-cpp_ts_add_grammar(
+CPPTSAddGrammar(
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
     VERSION 0.24.8
