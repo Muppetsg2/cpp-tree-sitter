@@ -1,24 +1,24 @@
 # cpp-tree-sitter
 
 `cpp-tree-sitter` is a modern, lightweight **C++11 (and newer)** wrapper around the [tree-sitter](https://github.com/tree-sitter/tree-sitter/) parsing library. 
-It provides a clean, RAII-compliant interface and CMake integrations to simplify working with syntax trees in C++ projects.
-> Note on this Fork: This project is a significant evolution of the original repository by Nick Sumner. It has been rewritten to support older C++ standards (back to C++11), full Query/Wasm support, and advanced tree traversal utilities.
+It provides a clean, RAII-compliant interface and robust CMake integration to simplify working with syntax trees in C++ projects.
+> **Note on this Fork:** This project is a significant evolution of the original repository by Nick Sumner. It supports legacy C++ standards (back to C++11), full Query/Wasm support, and advanced tree traversal utilities.
 
 ## Key Features
-* **Modern RAII API:** Automatic memory management for Parsers, Trees, Nodes, and Cursors using standard smart pointers.
+* **Modern RAII API:** Automatic memory management for `Parsers`, `Trees`, `Nodes`, and `Cursors` using standard smart pointers.
 * **Broad Compatibility:** Supports **C++11, C++14, C++17, and C++20**. It automatically leverages modern features like `std::string_view` and `std::concepts` if available, while providing fallbacks for older standards.
 * **STL-style Iterators:** Use standard `for` loops to iterate over child nodes.
 * **Tree Visitor:** A built-in Depth-First Search (DFS) visitor (`ts::visit`) for easy tree traversal.
-* **Wasm Support:** High-level wrappers for loading and managing WebAssembly-based grammars.
+* **Wasm Support:** High-level wrappers for WebAssembly-based grammars.
 * **Query Engine:** Full support for tree-sitter queries (patterns and captures).
-* **CMake Integration:** Easy dependency management using [CPM.cmake](https://github.com/cpm-cmake/cpm.cmake).
+* **CMake Integration:** Seamless dependency management via [CPM.cmake](https://github.com/cpm-cmake/cpm.cmake).
 
 ## Requirements
 * **Compiler:** C++11 compatible or newer (C++17/20 recommended).
 * **Build System:** [CMake](https://cmake.org/) 3.30 or newer.
 
 ## Using in a CMake Project
-The easiest way to include `cpp-tree-sitter` is via CPM. Adding this wrapper automatically makes the core `tree-sitter` library available as well.
+The easiest way to integrate `cpp-tree-sitter` is via CPM. Adding this wrapper automatically makes the core `tree-sitter` library available as well.
 
 ```cmake
 cmake_minimum_required(VERSION 3.30)
@@ -43,17 +43,50 @@ CPPTSAddGrammar(
     VERSION 0.24.8
 )
 
-# or if you have grammar downloaded you can specify location using:
-# CPPTSAddGrammar(
-#     NAME tree-sitter-json
-#     SOURCE_DIR path/to/dir/tree-sitter-json
-# )
-#
-# or set CPP_TS_GRAMMAR_PATH before downloading cpp-tree-sitter
-
 add_executable(demo main.cpp)
 target_link_libraries(demo PRIVATE cpp-tree-sitter tree-sitter-json)
 ```
+
+## CMake Configuration
+
+`cpp-tree-sitter` provides several CMake options to customize the build process and manage dependencies.
+
+### Build Options
+
+You can set these options using `-DOPTION=VALUE` during the CMake configuration phase.
+
+|         Option        |      Default      |                                  Description                                   |
+|-----------------------|-------------------|--------------------------------------------------------------------------------|
+| `CPP_TS_BUILD_TESTS`  | ON (if top-level) |                       Build unit tests for the library.                        |
+| `CPP_TS_FEATURE_WASM` |        OFF        |               Enable WebAssembly support (requires `wasmtime`).                |
+| `CPP_TS_AMALGAMATED`  |        ON         | Build `tree-sitter` core using the amalgamated `lib.c` for faster compilation. |
+
+### Path Variables
+
+These variables control where the library looks for external dependencies or grammars.
+
+* `CPP_TS_WASMTIME_PATH`: Path to a local `wasmtime` installation. If not set and WASM is enabled, CMake will automatically download the appropriate binary for your system.
+
+* `CPP_TS_GRAMMAR_PATH`: A global directory where you store your Tree-sitter grammars. If set, `CPPTSAddGrammar` will first look here before attempting to download from Git.
+
+* `CPP_TS_WASM_DIR`: (Default: `${CMAKE_BINARY_DIR}/wasm_files`) Directory where downloaded `.wasm` grammar files are stored. It is only valid if you pass option `FIND_ALSO_WASM_FILE` or `FIND_ONLY_WASM_FILE` to `CPPTSAddGrammar`
+
+## Grammar Management
+
+The `CPPTSAddGrammar` function automates fetching and building grammars.
+
+|       Argument        |                              Description                              |
+|:----------------------|:----------------------------------------------------------------------|
+|        `NAME`         |          The name of the grammar (e.g., `tree-sitter-json`).          |
+|   `GIT_REPOSITORY`    |                    URL to the grammar repository.                     |
+|  `VERSION`/`GIT_TAG`  |                 Specific version or tag to download.                  |
+|     `SOURCE_DIR`      |       Path to a local grammar source (overrides Git download).        |
+| `FIND_ALSO_WASM_FILE` | If set, attempts to download/find the `.wasm` binary for the grammar. |
+| `FIND_ONLY_WASM_FILE` | Skip building the static library and only look for the `.wasm` file.  |
+
+### Helper Functions
+
+* `CPPTSCopyWasmtime(TARGET <target>)`: (Windows) Copies `wasmtime.dll` to the target's output directory.
 
 ## Quick Start Example
 
@@ -96,7 +129,7 @@ int main() {
 ## Major Improvements in this Fork
 
 ### Memory & Safety
-While the original project provided basic wrappers, this fork implements a full-scale **RAII** architecture. It includes specialized `FreeHelper` functors to ensure that internal C-allocated strings (like S-Expressions) are freed correctly. It also introduces `shared_ptr` for `Language` objects to prevent use-after-free errors when multiple parsers share a grammar.
+While the original project provided basic wrappers, this fork implements a **Full RAII** architecture. It uses specialized `FreeHelper` functors for C-allocated `strings` and `shared_ptr` for `Language` objects to prevent use-after-free errors.
 
 ### Compatibility Layer
 The library now features a custom `StringView` for C++11/14 environments and detects standard versions to enable `std::optional` or C++20 `concepts` dynamically.
@@ -108,7 +141,7 @@ The library now features a custom `StringView` for C++11/14 environments and det
 
 ### Comparison Table
 |      Feature     |   Original Fork  |               This Fork               |
-|------------------|------------------|---------------------------------------|
+|:-----------------|:-----------------|:--------------------------------------|
 | **C++ Standard** |    C++17 only    |          C++11 through C++20          |
 |   **Traversal**  | Manual/Iterators |          Iterators + Visitor          |
 |    **Queries**   |        No        |             Yes (Full API)            |
