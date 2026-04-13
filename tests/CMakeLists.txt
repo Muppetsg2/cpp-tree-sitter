@@ -23,8 +23,6 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD ${CPP_TS_TEST_CXX_STANDARD}
 )
 
-# target_compile_features(${TARGET_NAME} PRIVATE cxx_std_${CPP_TS_TEST_CXX_STANDARD})
-
 target_include_directories(${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 get_target_property(ACTUAL_STANDARD ${TARGET_NAME} CXX_STANDARD)
@@ -38,16 +36,18 @@ elseif(UNIX)
     target_compile_definitions(${TARGET_NAME} PRIVATE __linux__)
 endif()
 
-CPPTSAddGrammar(
+set(JSONGrammarArgs
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
     VERSION 0.24.8
-    FIND_ALSO_WASM_FILE
 )
 
 if(CPP_TS_FEATURE_WASM)
     CPPTSCopyWasmtime(TARGET ${TARGET_NAME})
+    list(APPEND JSONGrammarArgs FIND_ALSO_WASM_FILE)
 endif()
+
+CPPTSAddGrammar(${JSONGrammarArgs})
 
 CPMAddPackage(
     URI "gh:catchorg/Catch2@3.14.0"

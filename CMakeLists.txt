@@ -20,7 +20,7 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 option(CPP_TS_BUILD_TESTS "Build test for cpp-tree-sitter" ${CPP_TS_BUILD_TESTS_DEFAULT})
-option(CPP_TS_FEATURE_WASM "Enable the Wasm feature" ON)
+option(CPP_TS_FEATURE_WASM "Enable the Wasm feature" OFF)
 option(CPP_TS_AMALGAMATED "Build using an amalgamated source" ON)
 
 if(DEFINED CPP_TS_WASMTIME_PATH AND NOT CACHE{CPP_TS_WASMTIME_PATH})

@@ -9,6 +9,8 @@
 
 // STL
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -190,7 +192,7 @@ TEST_CASE("QueryCursor Limits and Ranges", "[query][cursor]")
         int            count = 0;
         while (cursor.nextMatch(m))
         {
-            count++;
+            ++count;
         }
 
         CHECK(cursor.didExceedMatchLimit() == true);
@@ -208,7 +210,7 @@ TEST_CASE("QueryCursor Limits and Ranges", "[query][cursor]")
         uint32_t       count = 0;
         while (cursor.nextMatch(m))
         {
-            count++;
+            ++count;
         }
         CHECK(count == 2);
     }
@@ -304,5 +306,113 @@ TEST_CASE("QueryCursor Remove Match", "[query][cursor]")
         cursor.removeMatch(first_id);
 
         CHECK(cursor.nextMatch(m));
+    }
+}
+
+TEST_CASE("Query Exception Handling and Limits", "[query][exceptions]")
+{
+    ts::Language lang        = tree_sitter_json();
+    std::string  valid_query = "(number) @num";
+
+    SECTION("Invalid language throws runtime_error")
+    {
+        ts::Language invalid_lang(nullptr);
+        CHECK_THROWS_AS(ts::Query(invalid_lang, valid_query), std::runtime_error);
+    }
+
+    SECTION("Exceeding 4GB source size limit throws length_error")
+    {
+        // Fake a massive string view to trigger the overflow protection
+        const char      *fake_str      = "fake";
+        constexpr size_t overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+
+        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+
+        CHECK_THROWS_AS(ts::Query(lang, huge_view), std::length_error);
+    }
+
+    SECTION("Exceeding 4GB capture name limit in disableCapture throws length_error")
+    {
+        ts::Query        query(lang, valid_query);
+        const char      *fake_str      = "fake";
+        constexpr size_t overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+
+        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+
+        CHECK_THROWS_AS(query.disableCapture(huge_view), std::length_error);
+    }
+}
+
+TEST_CASE("QueryCursor Depth Limits", "[query][cursor]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+
+    // Deeply nested array
+    std::string     code = "[[[[1]]]]";
+    ts::Tree        tree = parser.parseString(code);
+    ts::Query       query(lang, "(number) @n");
+    ts::QueryCursor cursor;
+
+    SECTION("Restrict search depth")
+    {
+        // Number is deeply nested, so restricting max start depth to 1 should prevent matching
+        cursor.setMaxStartDepth(1);
+        cursor.exec(query, tree.getRootNode());
+
+        ts::QueryMatch m;
+        CHECK_FALSE(cursor.nextMatch(m));
+    }
+
+    SECTION("Reset search depth allows matching again")
+    {
+        cursor.setMaxStartDepth(1);
+        cursor.resetMaxStartDepth(); // Removes the limit
+        cursor.exec(query, tree.getRootNode());
+
+        ts::QueryMatch m;
+        CHECK(cursor.nextMatch(m));
+    }
+}
+
+TEST_CASE("QueryCursor Advanced Ranges", "[query][cursor][range]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+
+    // Two objects on different lines
+    std::string     code = "{\n\"a\": 1\n}\n{\n\"b\": 2\n}";
+    ts::Tree        tree = parser.parseString(code);
+    ts::Query       query(lang, "(number) @n");
+    ts::QueryCursor cursor;
+
+    SECTION("Point Range restriction")
+    {
+        // Restrict to the first line (skipping the second object)
+        ts::Extent<ts::Point> point_range{ { 0, 0 }, { 2, 0 } };
+        bool                  ok = cursor.setPointRange(point_range);
+        REQUIRE(ok);
+
+        cursor.exec(query, tree.getRootNode());
+        ts::QueryMatch m;
+        int            count = 0;
+        while (cursor.nextMatch(m))
+        {
+            ++count;
+        }
+
+        // Should only find '1', not '2'
+        CHECK(count == 1);
+    }
+
+    SECTION("Containing Byte and Point Ranges")
+    {
+        // Note: These methods return true if the operation succeeds in the C API.
+        // We verify that the API accepts valid Extent structs.
+        ts::Extent<uint32_t> byte_range{ 0, 5 };
+        CHECK(cursor.setContainingByteRange(byte_range));
+
+        ts::Extent<ts::Point> pt_range{ { 0, 0 }, { 0, 5 } };
+        CHECK(cursor.setContainingPointRange(pt_range));
     }
 }

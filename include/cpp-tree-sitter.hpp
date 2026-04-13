@@ -617,6 +617,15 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
+        InputEdit()
+            : start_byte(0)
+            , old_end_byte(0)
+            , new_end_byte(0)
+            , start_point(Point{})
+            , old_end_point(Point{})
+            , new_end_point(Point{})
+        {}
+
         InputEdit(uint32_t start_byte_value,
                   uint32_t old_end_byte_value,
                   uint32_t new_end_byte_value,
@@ -742,9 +751,8 @@ namespace ts
         InputEncoding      encoding;
         ts::DecodeFunction decode;
 
-        Input()
+        Input() : impl(std::make_unique<TSInput>()), encoding(InputEncoding::UTF8), read(nullptr), decode(nullptr)
         {
-            impl          = std::make_unique<TSInput>();
             impl->payload = const_cast<Input *>(this);
             impl->read    = read_proxy;
         }
@@ -1239,11 +1247,13 @@ namespace ts
             }
 
             Extent<uint32_t> extents = getByteRange();
-            if (extents.end > source.size())
+            size_t           end     = static_cast<size_t>(extents.end);
+            if (end > source.size())
             {
                 return "";
             }
-            return source.substr(extents.start, extents.end - extents.start);
+            size_t start = static_cast<size_t>(extents.start);
+            return source.substr(start, end - start);
         }
 
         [[nodiscard]] std::string getSourceText(details::StringViewParameter source) const
@@ -1702,7 +1712,10 @@ namespace ts
             printDotGraph(file);
 
             // Close local file descriptor after write
-            fclose(file);
+            if (file != nullptr)
+            {
+                fclose(file);
+            }
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1765,7 +1778,7 @@ namespace ts
             {
                 throw std::runtime_error("Tree-sitter: Passed Language for Parser was invalid");
             }
-            setLanguage(language);
+            static_cast<void>(setLanguage(language));
         }
 
 #if defined(CPP_TREE_SITTER_FEATURE_WASM)
@@ -2033,7 +2046,10 @@ namespace ts
             enableDotGraphs(file);
 
             // Close local file descriptor
-            fclose(file);
+            if (file != nullptr)
+            {
+                fclose(file);
+            }
         }
 
         void disableDotGraphs()
@@ -2117,7 +2133,10 @@ namespace ts
         }
 
         TreeCursor(const TSTreeCursor &cursor) noexcept : impl{ ts_tree_cursor_copy(&cursor) }
-        {}
+        {
+            TSNode node = ts_tree_cursor_current_node(&impl);
+            is_valid    = !ts_node_is_null(node);
+        }
 
         // By default avoid copies until the ergonomics are clearer.
         TreeCursor(const TreeCursor &other) = delete;
@@ -2125,6 +2144,7 @@ namespace ts
         TreeCursor(TreeCursor &&other) noexcept : impl{}
         {
             std::swap(impl, other.impl);
+            std::swap(is_valid, other.is_valid);
         }
 
         ~TreeCursor() noexcept
@@ -2160,7 +2180,7 @@ namespace ts
 
         void reset(TreeCursor &cursor) noexcept
         {
-            if (!is_valid || cursor.isValid())
+            if (!is_valid || !cursor.isValid())
             {
                 return;
             }
@@ -2301,11 +2321,32 @@ namespace ts
         // Operators
         ////////////////////////////////////////////////////////////////
 
+        [[nodiscard]] bool operator==(const TreeCursor &other) const noexcept
+        {
+            if (is_valid != other.is_valid)
+            {
+                return false;
+            }
+
+            if (!is_valid)
+            {
+                return true; // Both are invalid, so they are conceptually equal
+            }
+
+            return getCurrentNode() == other.getCurrentNode();
+        }
+
+        [[nodiscard]] bool operator!=(const TreeCursor &other) const noexcept
+        {
+            return !(*this == other);
+        }
+
         TreeCursor &operator=(const TreeCursor &other) = delete;
 
         TreeCursor &operator=(TreeCursor &&other) noexcept
         {
             std::swap(impl, other.impl);
+            std::swap(is_valid, other.is_valid);
             return *this;
         }
 
@@ -2985,6 +3026,26 @@ namespace ts
         using difference_type   = int;
         using iterator_category = std::input_iterator_tag;
 
+        class Child
+        {
+        public:
+            explicit Child(value_type v) noexcept : value(v)
+            {}
+
+            const value_type *operator->() const noexcept
+            {
+                return &value;
+            }
+
+            value_type *operator->() noexcept
+            {
+                return &value;
+            }
+
+        private:
+            value_type value;
+        };
+
         ////////////////////////////////////////////////////////////////
         // Lifecycle
         ////////////////////////////////////////////////////////////////
@@ -3010,6 +3071,13 @@ namespace ts
         {
             atEnd = !cursor.gotoNextSibling();
             return *this;
+        }
+
+        Child operator->() const noexcept
+        {
+            // Dereference this iterator to get the value,
+            // then wrap it in the safe proxy.
+            return Child(**this);
         }
 
         ChildIterator &operator++(int) noexcept

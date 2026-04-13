@@ -9,11 +9,14 @@
 
 // STL
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 extern "C" const TSLanguage *tree_sitter_json();
 
@@ -244,5 +247,100 @@ TEST_CASE("Tree printDotGraph by path", "[tree][debug]")
         f.close();
 
         CHECK(std::remove(filename.c_str()) == 0);
+    }
+}
+
+TEST_CASE("Tree Invalid State Handling", "[tree][exceptions]")
+{
+    // Create an invalid tree by passing nullptr
+    ts::Tree invalid_tree(nullptr);
+
+    SECTION("Validation flags and basic getters")
+    {
+        CHECK_FALSE(invalid_tree.isValid());
+        CHECK_FALSE(invalid_tree.hasError());
+        CHECK(invalid_tree.getLanguage().operator const TSLanguage *() == nullptr);
+        CHECK(invalid_tree.operator TSTree *() == nullptr);
+    }
+
+    SECTION("Node access on invalid tree returns null nodes")
+    {
+        CHECK(invalid_tree.getRootNode().isNull());
+        CHECK(invalid_tree.getRootNodeWithOffset(0, { 0, 0 }).isNull());
+    }
+
+    SECTION("Editing an invalid tree throws logic_error")
+    {
+        ts::InputEdit dummy_edit{};
+        // The edit method has an explicit guard against modifying an invalid tree
+        CHECK_THROWS_AS(invalid_tree.edit(dummy_edit), std::logic_error);
+    }
+
+    SECTION("Ranges on invalid tree return empty vectors")
+    {
+        CHECK(invalid_tree.getIncludedRanges().empty());
+
+        ts::Language lang = tree_sitter_json();
+        ts::Parser   parser(lang);
+        ts::Tree     valid_tree = parser.parseString("{}");
+
+        // If either tree is invalid, getChangedRanges should safely return an empty vector
+        CHECK(ts::Tree::getChangedRanges(invalid_tree, valid_tree).empty());
+        CHECK(ts::Tree::getChangedRanges(valid_tree, invalid_tree).empty());
+        CHECK(ts::Tree::getChangedRanges(invalid_tree, invalid_tree).empty());
+    }
+
+    SECTION("Debugging methods on invalid tree do not crash")
+    {
+        // These should hit the early return guards and do nothing without throwing
+        CHECK_NOTHROW(invalid_tree.printDotGraph(-1));
+        CHECK_NOTHROW(invalid_tree.printDotGraph("dummy_output.dot"));
+
+        FILE *dummy_file = nullptr;
+        CHECK_NOTHROW(invalid_tree.printDotGraph(dummy_file));
+    }
+}
+
+TEST_CASE("Tree Lifecycle Edge Cases", "[tree][lifecycle]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+    std::string  code = "[1, 2, 3]";
+    ts::Tree     tree = parser.parseString(code);
+
+    SECTION("Self Assignment")
+    {
+        // Suppress compiler warnings about self-assignment by using a pointer
+        ts::Tree *ptr_tree = &tree;
+        tree               = *ptr_tree;
+
+        CHECK(tree.isValid());
+        CHECK(tree.getRootNode().getType().compare("document") == 0);
+    }
+
+    SECTION("Copying an invalid tree results in an invalid tree")
+    {
+        ts::Tree invalid_tree(nullptr);
+        ts::Tree invalid_copy = invalid_tree.copy();
+
+        CHECK_FALSE(invalid_copy.isValid());
+    }
+}
+
+TEST_CASE("Tree Unchanged Ranges", "[tree]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+    std::string  code = "{\"key\": \"value\"}";
+
+    SECTION("Changed ranges are empty if no edits occurred")
+    {
+        ts::Tree tree1 = parser.parseString(code);
+        ts::Tree tree2 = parser.parseString(code);
+
+        // Even though they are different tree instances, no structural edits
+        // were recorded, so changed ranges should be empty.
+        auto changed = ts::Tree::getChangedRanges(tree1, tree2);
+        CHECK(changed.empty());
     }
 }

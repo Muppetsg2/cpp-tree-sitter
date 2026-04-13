@@ -9,6 +9,7 @@
 
 // STL
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -337,4 +338,133 @@ TEST_CASE("Node S-Expression", "[node]")
 
     REQUIRE(sexpr != nullptr);
     CHECK(std::string(sexpr.get()).find("array") != std::string::npos);
+}
+
+TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+    std::string  code  = "[1, 2, 3]";
+    ts::Tree     tree  = parser.parseString(code);
+    ts::Node     root  = tree.getRootNode();
+    ts::Node     array = root.getNamedChild(0);
+
+    SECTION("Out of bounds child access throws out_of_range")
+    {
+        uint32_t total_children       = array.getChildCount();
+        uint32_t total_named_children = array.getNamedChildCount();
+
+        // Accessing exactly at the count index should throw
+        CHECK_THROWS_AS(array.getChild(total_children), std::out_of_range);
+        CHECK_THROWS_AS(array.getNamedChild(total_named_children), std::out_of_range);
+    }
+
+    SECTION("Source text bounds check")
+    {
+        // Provide a source string that is significantly shorter than the actual node length
+        std::string short_source = "[";
+
+        // getSourceRange returns an empty string view if extents.end > source.size()
+        CHECK(array.getSourceRange(short_source).empty());
+    }
+
+    SECTION("Field name size overflow throws length_error")
+    {
+        const char      *fake_str      = "fake";
+        constexpr size_t overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+
+        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+
+        CHECK_THROWS_AS(array.getChildByFieldName(huge_view), std::length_error);
+    }
+
+    SECTION("Mutating a null node throws logic_error")
+    {
+        ts::Node      null_node = ts::Node::null();
+        ts::InputEdit valid_edit{ 0, 0, 1, { 0, 0 }, { 0, 0 }, { 0, 1 } };
+
+        CHECK_THROWS_AS(null_node.edit(valid_edit), std::logic_error);
+    }
+}
+
+TEST_CASE("Node Search and Descendants (Unnamed Variants)", "[node][search]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+    std::string  code = R"({"key": "value"})";
+    ts::Tree     tree = parser.parseString(code);
+    ts::Node     root = tree.getRootNode();
+
+    SECTION("Descendants Count")
+    {
+        CHECK(root.getDescendantsCount() > 0);
+    }
+
+    SECTION("Unnamed descendant by byte and point range")
+    {
+        // Byte 0 is '{', which is an unnamed punctuation node
+        ts::Node brace_node = root.getDescendantForByteRange({ 0, 1 });
+        CHECK_FALSE(brace_node.isNamed());
+        CHECK(brace_node.getType().compare("{") == 0);
+
+        ts::Node brace_node_pt = root.getDescendantForPointRange({ { 0, 0 }, { 0, 1 } });
+        CHECK(brace_node_pt == brace_node);
+    }
+}
+
+TEST_CASE("Extended Null Node Fallbacks", "[node][null]")
+{
+    ts::Node null_node = ts::Node::null();
+
+    SECTION("Search and Descendants on null")
+    {
+        CHECK(null_node.getDescendantsCount() == 0);
+        CHECK(null_node.getFirstChildForByte(0).isNull());
+        CHECK(null_node.getFirstNamedChildForByte(0).isNull());
+        CHECK(null_node.getDescendantForByteRange({ 0, 1 }).isNull());
+        CHECK(null_node.getNamedDescendantForByteRange({ 0, 1 }).isNull());
+        CHECK(null_node.getDescendantForPointRange({ { 0, 0 }, { 0, 1 } }).isNull());
+        CHECK(null_node.getNamedDescendantForPointRange({ { 0, 0 }, { 0, 1 } }).isNull());
+    }
+
+    SECTION("Fields on null")
+    {
+        CHECK(null_node.getFieldNameForChild(0).empty());
+        CHECK(null_node.getFieldNameForNamedChild(0).empty());
+        CHECK(null_node.getChildByFieldName("test").isNull());
+        CHECK(null_node.getChildByFieldID(1).isNull());
+    }
+
+    SECTION("Parse State on null")
+    {
+        CHECK(null_node.getParseState() == 0);
+        CHECK(null_node.getNextParseState() == 0);
+    }
+
+    SECTION("S-Expression on null")
+    {
+        CHECK(null_node.getSExpr() == nullptr);
+    }
+}
+
+TEST_CASE("Node Cursor Instantiation", "[node][cursor]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+    ts::Tree     tree = parser.parseString("[1, 2]");
+    ts::Node     root = tree.getRootNode();
+
+    SECTION("Valid node returns valid cursor")
+    {
+        ts::TreeCursor cursor = root.getCursor();
+        CHECK(cursor.isValid());
+        CHECK(cursor.getCurrentNode() == root);
+    }
+
+    SECTION("Null node returns invalid cursor")
+    {
+        ts::Node       null_node = ts::Node::null();
+        ts::TreeCursor cursor    = null_node.getCursor();
+        CHECK_FALSE(cursor.isValid());
+    }
 }

@@ -12,7 +12,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -233,5 +236,135 @@ TEST_CASE("Parser DOT graphs by filename", "[parser][debug]")
         f.close();
 
         CHECK(std::remove(filename.c_str()) == 0);
+    }
+}
+
+TEST_CASE("Parser Exception Handling (No Language)", "[parser][exceptions]")
+{
+    // Create a parser without assigning a language
+    ts::Parser empty_parser;
+
+    SECTION("Validation flags and getters on empty parser")
+    {
+        CHECK_FALSE(empty_parser.hasLanguage());
+        CHECK_FALSE(empty_parser.getCurrentLanguage().isValid());
+    }
+
+    SECTION("Parsing without language throws logic_error")
+    {
+        std::string code = "{}";
+
+        CHECK_THROWS_AS(empty_parser.parseString(code), std::logic_error);
+        CHECK_THROWS_AS(empty_parser.parseStringEncoded(code, ts::InputEncoding::UTF8), std::logic_error);
+
+        ts::Input input;
+        input.encoding = ts::InputEncoding::UTF8;
+        input.read     = [](uint32_t, ts::Point, uint32_t *read)
+        {
+            *read = 0;
+            return ts::details::StringViewReturn();
+        };
+
+        CHECK_THROWS_AS(empty_parser.parse(input), std::logic_error);
+    }
+
+    SECTION("Initialization with invalid language throws runtime_error")
+    {
+        ts::Language invalid_lang(nullptr);
+        CHECK_THROWS_AS(ts::Parser(invalid_lang), std::runtime_error);
+    }
+}
+
+TEST_CASE("Parser Input Limits (4GB Overflow)", "[parser][exceptions]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+
+    SECTION("Exceeding 4GB string limit throws length_error")
+    {
+        // We avoid allocating 4GB by creating a fake view with an artificial size
+        const char      *fake_str      = "fake";
+        constexpr size_t overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+
+        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+
+        CHECK_THROWS_AS(parser.parseString(huge_view), std::length_error);
+        CHECK_THROWS_AS(parser.parseStringEncoded(huge_view, ts::InputEncoding::UTF8), std::length_error);
+    }
+}
+
+TEST_CASE("Parser Included Ranges Merging Algorithm", "[parser][range]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+
+    SECTION("Empty ranges resets included ranges")
+    {
+        std::vector<ts::Range> empty_ranges;
+        CHECK(parser.setIncludedRanges(empty_ranges));
+        CHECK_FALSE(parser.getIncludedRanges().empty());
+    }
+
+    SECTION("Merge overlapping ranges")
+    {
+        // Range 1: bytes 0 to 10
+        ts::Range r1{ ts::Extent<ts::Point>{ { 0, 0 }, { 0, 10 } }, ts::Extent<uint32_t>{ 0, 10 } };
+        // Range 2: bytes 5 to 15 (overlaps with r1)
+        ts::Range r2{ ts::Extent<ts::Point>{ { 0, 5 }, { 0, 15 } }, ts::Extent<uint32_t>{ 5, 15 } };
+
+        std::vector<ts::Range> ranges = { r1, r2 };
+        CHECK(parser.setIncludedRanges(ranges));
+
+        auto merged = parser.getIncludedRanges();
+        REQUIRE(merged.size() == 1); // Should be merged into a single range
+        CHECK(merged[0].byte.start == 0);
+        CHECK(merged[0].byte.end == 15);
+    }
+
+    SECTION("Merge fully enveloped ranges")
+    {
+        // Range 1: bytes 0 to 20
+        ts::Range r1{ ts::Extent<ts::Point>{ { 0, 0 }, { 0, 20 } }, ts::Extent<uint32_t>{ 0, 20 } };
+        // Range 2: bytes 5 to 10 (fully inside r1)
+        ts::Range r2{ ts::Extent<ts::Point>{ { 0, 5 }, { 0, 10 } }, ts::Extent<uint32_t>{ 5, 10 } };
+
+        // Even if provided in reverse order, the sort algorithm should handle them
+        std::vector<ts::Range> ranges = { r2, r1 };
+        CHECK(parser.setIncludedRanges(ranges));
+
+        auto merged = parser.getIncludedRanges();
+        REQUIRE(merged.size() == 1);
+        CHECK(merged[0].byte.start == 0);
+        CHECK(merged[0].byte.end == 20);
+    }
+}
+
+TEST_CASE("Parser Included Ranges - Reset to full document", "[parser][range]")
+{
+    ts::Language lang = tree_sitter_json();
+    ts::Parser   parser(lang);
+    std::string  code = "[1, 2, 3]";
+
+    SECTION("Resetting ranges parses the whole document")
+    {
+        // Restrict the parser to a specific narrow range (e.g., just the number '2')
+        ts::Range narrow_range{ ts::Extent<ts::Point>{ { 0, 4 }, { 0, 5 } }, ts::Extent<uint32_t>{ 4, 5 } };
+
+        REQUIRE(parser.setIncludedRanges({ narrow_range }));
+
+        // Pass an empty vector to tell the parser to evaluate the entire document again
+        std::vector<ts::Range> empty_ranges;
+        CHECK(parser.setIncludedRanges(empty_ranges));
+
+        // Parse the code to verify the parser successfully reads the whole string
+        ts::Tree tree = parser.parseString(code);
+        CHECK_FALSE(tree.hasError());
+
+        // The root node should span the entire length of the code
+        ts::Node root = tree.getRootNode();
+        CHECK(root.getByteRange().end == code.length());
+
+        // Tree-sitter returns one array when no ranges are restricting it
+        CHECK(parser.getIncludedRanges().size() == 1);
     }
 }
