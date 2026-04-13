@@ -148,11 +148,11 @@ function(cpp_ts_add_grammar)
                 endif()
 
                 set(WASM_FILE_URL "${REPO}/releases/download/${RELEASE_VERSION}/${NAME}.wasm")
-                set(WASM_FILE_DESTINATION "${TREE_SITTER_WASM_DIR}/${NAME}.wasm")
+                set(WASM_FILE_DESTINATION "${CPP_TS_WASM_DIR}/${NAME}.wasm")
 
                 if(NOT EXISTS "${WASM_FILE_DESTINATION}")
-                    if(NOT EXISTS "${TREE_SITTER_WASM_DIR}")
-                        file(MAKE_DIRECTORY "${TREE_SITTER_WASM_DIR}")
+                    if(NOT EXISTS "${CPP_TS_WASM_DIR}")
+                        file(MAKE_DIRECTORY "${CPP_TS_WASM_DIR}")
                     endif()
                     file(DOWNLOAD 
                         "${WASM_FILE_URL}" 

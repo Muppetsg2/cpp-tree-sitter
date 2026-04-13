@@ -42,6 +42,7 @@ cpp_ts_add_grammar(
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
     VERSION 0.24.8
+    FIND_ALSO_WASM_FILE
 )
 
 cpp_ts_copy_wasmtime(TARGET ${TARGET_NAME})
@@ -103,7 +104,7 @@ endif()
 
 if(CPP_TS_FEATURE_WASM)
     target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_FEATURE_WASM)
-    target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_WASM_FILES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/wasm")
+    target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_WASM_FILES_DIR="${CPP_TS_WASM_DIR}")
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE 

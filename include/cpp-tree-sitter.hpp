@@ -2532,7 +2532,7 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        QueryCursor() noexcept : impl{ ts_query_cursor_new(), details::FreeHelper::operator()<QueryCursor> }
+        QueryCursor() noexcept : impl(ts_query_cursor_new())
         {}
 
         // In C API QueryCursor don't have copy function
@@ -2654,7 +2654,7 @@ namespace ts
         QueryCursor &operator=(QueryCursor &&) noexcept = default;
 
     private:
-        std::unique_ptr<TSQueryCursor, decltype(&details::FreeHelper::operator()<QueryCursor>)> impl;
+        std::unique_ptr<TSQueryCursor, details::FreeHelper> impl;
     };
 
     /////////////////////////////////////////////////////////////////////////////
@@ -2742,10 +2742,7 @@ namespace ts
         }
 
     private:
-        std::unique_ptr<TSLookaheadIterator, decltype(&details::FreeHelper::operator()<TSLookaheadIterator>)> impl = {
-            nullptr,
-            details::FreeHelper::operator()<TSLookaheadIterator>
-        };
+        std::unique_ptr<TSLookaheadIterator, details::FreeHelper> impl = nullptr;
     };
 
     [[nodiscard]] inline LookaheadIterator Language::getLookaheadIterator(StateID state) const
