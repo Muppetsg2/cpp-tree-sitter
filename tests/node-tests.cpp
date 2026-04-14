@@ -166,11 +166,12 @@ TEST_CASE("Node flags and states", "[node]")
         CHECK(root.hasError());
 
         ts::visit(root,
-                  [](ts::Node n)
+                  [](ts::Node n) -> bool
                   {
                       if (n.isMissing())
                       {
                           SUCCEED("Found missing node");
+                          return true;
                       }
                   });
     }

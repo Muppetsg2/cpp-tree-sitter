@@ -22,7 +22,12 @@ TEST_CASE("Visitor Simply Usage", "[visitor]")
     SECTION("Visit all nodes")
     {
         int total_nodes = 0;
-        ts::visit(tree.getRootNode(), [&](ts::Node n) { ++total_nodes; });
+        ts::visit(tree.getRootNode(),
+                  [&](ts::Node n) -> bool
+                  {
+                      ++total_nodes;
+                      return false;
+                  });
 
         // document, array, [, 1, ,, 2, ] = 7 nodes
         CHECK(total_nodes == 7);
@@ -42,7 +47,12 @@ TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
         int calls = 0;
 
         // Passing a null node should hit the early return guard
-        ts::visit(ts::Node::null(), [&](ts::Node) { ++calls; });
+        ts::visit(ts::Node::null(),
+                  [&](ts::Node) -> bool
+                  {
+                      ++calls;
+                      return false;
+                  });
 
         CHECK(calls == 0);
     }
@@ -57,7 +67,7 @@ TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
         bool escaped_subtree   = false;
 
         ts::visit(inner_array,
-                  [&](ts::Node n)
+                  [&](ts::Node n) -> bool
                   {
                       ++inner_nodes_count;
 
@@ -66,7 +76,9 @@ TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
                       if (n == root || n == outer_array || n.getSourceText(code) == "1")
                       {
                           escaped_subtree = true;
+                          return true;
                       }
+                      return false;
                   });
 
         // The expected nodes inside `[2, 3]` are: array, [, 2, ,, 3, ] -> 6 nodes total
@@ -81,10 +93,11 @@ TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
 
         int calls = 0;
         ts::visit(number_node,
-                  [&](ts::Node n)
+                  [&](ts::Node n) -> bool
                   {
                       ++calls;
                       CHECK(n.getType().compare("number") == 0);
+                      return false;
                   });
 
         // A terminal node should be visited exactly once
