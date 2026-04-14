@@ -3146,7 +3146,7 @@ namespace ts
 #if TS_HAS_CXX20
     template <typename T>
     concept VisitorConcept = requires {
-        { std::declval<T>()(std::declval<Node>()) } -> std::same_as<void>;
+        { std::declval<T>()(std::declval<Node>()) } -> std::convertible_to<bool>;
     };
 
     template <VisitorConcept F>
@@ -3156,9 +3156,9 @@ namespace ts
     {};
 
     template <typename T>
-    struct VisitorConcept<
-            T,
-            std::void_t<std::enable_if_t<std::is_same_v<void, decltype(std::declval<T>()(std::declval<Node>()))>>>>
+    struct VisitorConcept<T,
+                          std::void_t<std::enable_if_t<
+                                  std::is_convertible_v<decltype(std::declval<T>()(std::declval<Node>())), bool>>>>
         : std::true_type
     {};
 
@@ -3166,6 +3166,7 @@ namespace ts
 #else
 template <typename F>
 #endif
+    // Callback should return `true` if wants to break from loop.
     void visit(Node root, F &&callback)
     {
         if (root.isNull())
@@ -3178,7 +3179,10 @@ template <typename F>
 
         while (true)
         {
-            callback(cursor.getCurrentNode());
+            if (callback(cursor.getCurrentNode()))
+            {
+                break;
+            }
 
             // 1. Go to first child (down)
             if (cursor.gotoFirstChild())
