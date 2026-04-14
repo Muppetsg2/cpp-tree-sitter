@@ -112,11 +112,12 @@ int main() {
     ts::Node root = tree.getRootNode();
 
     // Use the Visitor for easy traversal (New in this fork)
-    ts::visit(root, [](ts::Node node) {
+    ts::visit(root, [](ts::Node node) -> bool {
         if (node.isNamed()) {
             std::cout << "Node: " << node.getType() << " at " 
                       << node.getByteRange().start << "\n";
         }
+        return false;
     });
 
     // Or use STL-style iteration
