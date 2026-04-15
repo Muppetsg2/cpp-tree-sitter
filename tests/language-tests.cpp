@@ -71,6 +71,12 @@ TEST_CASE("Language Deep Dive", "[language]")
 
         CHECK(lang.getFieldIDForName("non_existent_field") == 0);
         CHECK(lang.getFieldNameForID(0).compare("") == 0);
+
+        auto fields = lang.getAllFieldsNames();
+        for (const auto &field : fields)
+        {
+            CHECK(field.compare("") != 0);
+        }
     }
 
     SECTION("Type Hierarchy")
