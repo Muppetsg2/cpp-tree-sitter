@@ -939,6 +939,7 @@ namespace ts
             return static_cast<SymbolType>(ts_language_symbol_type(impl.get(), symbol));
         }
 
+        // Returns 0 if field was not found
         [[nodiscard]] Symbol getSymbolForName(details::StringViewParameter name, bool isNamed) const
         {
             if (!is_valid)
@@ -967,6 +968,7 @@ namespace ts
             return details::make_view(ts_language_field_name_for_id(impl.get(), id));
         }
 
+        // Returns 0 if field was not found
         [[nodiscard]] FieldID getFieldIDForName(details::StringViewParameter name) const
         {
             if (!is_valid)
@@ -980,6 +982,32 @@ namespace ts
             }
 
             return ts_language_field_id_for_name(impl.get(), name.data(), static_cast<uint32_t>(name.size()));
+        }
+
+        [[nodiscard]] std::vector<details::StringViewReturn> getAllFieldsNames() const
+        {
+            if (!is_valid)
+            {
+                return {};
+            }
+
+            const TSLanguage *raw_lang = impl.get();
+            const uint32_t    count    = ts_language_field_count(raw_lang);
+
+            if (count == 0)
+            {
+                return {};
+            }
+
+            std::vector<details::StringViewReturn> names;
+            names.reserve(static_cast<size_t>(count));
+
+            for (uint32_t i = 1; i <= count; ++i)
+            {
+                names.emplace_back(details::make_view(ts_language_field_name_for_id(raw_lang, i)));
+            }
+
+            return names;
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1138,12 +1166,15 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
+        Node() noexcept : impl{ TSNode{} }
+        {}
+
         explicit Node(TSNode node) noexcept : impl{ node }
         {}
 
         [[nodiscard]] static Node null() noexcept
         {
-            return Node{ TSNode{} };
+            return Node();
         }
 
         ////////////////////////////////////////////////////////////////
@@ -1326,6 +1357,75 @@ namespace ts
             return Node{ ts_node_child_with_descendant(impl, descendant.impl) };
         }
 
+        [[nodiscard]] Node getChildByType(details::StringViewParameter name) const
+        {
+            if (name.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input name exceeds maximum size of 4GB");
+            }
+
+            if (isNull())
+            {
+                return null();
+            }
+
+            Language lang    = getLanguage();
+            bool     isNamed = true;
+            Symbol   sym     = lang.getSymbolForName(name, isNamed);
+
+            if (sym == 0)
+            {
+                isNamed = false;
+                sym     = lang.getSymbolForName(name, isNamed);
+            }
+
+            if (sym == 0)
+            {
+                return null();
+            }
+
+            if (isNamed)
+            {
+                for (Node child = getFirstNamedChild(); !child.isNull(); child = child.getNextNamedSibling())
+                {
+                    if (child.getSymbol() == sym)
+                    {
+                        return child;
+                    }
+                }
+            }
+            else
+            {
+                for (Node child = getFirstChild(); !child.isNull(); child = child.getNextSibling())
+                {
+                    if (child.getSymbol() == sym)
+                    {
+                        return child;
+                    }
+                }
+            }
+
+            return null();
+        }
+
+        [[nodiscard]] Node getChildBySymbol(Symbol sym) const noexcept
+        {
+            if (isNull())
+            {
+                return null();
+            }
+
+            for (Node child = getFirstChild(); !child.isNull(); child = child.getNextSibling())
+            {
+                if (child.getSymbol() == sym)
+                {
+                    return child;
+                }
+            }
+
+            return null();
+        }
+
         ////////////////////////////////////////////////////////////////
         // Navigation (Named Children)
         ////////////////////////////////////////////////////////////////
@@ -1365,6 +1465,55 @@ namespace ts
             uint32_t count = getNamedChildCount();
 
             return getNamedChild(count > 0 ? count - 1 : count);
+        }
+
+        [[nodiscard]] Node getNamedChildByType(details::StringViewParameter name) const
+        {
+            if (name.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw std::length_error("Tree-sitter: Input name exceeds maximum size of 4GB");
+            }
+
+            if (isNull())
+            {
+                return null();
+            }
+
+            Language lang = getLanguage();
+            Symbol   sym  = lang.getSymbolForName(name, true);
+
+            if (sym == 0)
+            {
+                return null();
+            }
+
+            for (Node child = getFirstNamedChild(); !child.isNull(); child = child.getNextNamedSibling())
+            {
+                if (child.getSymbol() == sym)
+                {
+                    return child;
+                }
+            }
+
+            return null();
+        }
+
+        [[nodiscard]] Node getNamedChildBySymbol(Symbol sym) const noexcept
+        {
+            if (isNull())
+            {
+                return null();
+            }
+
+            for (Node child = getFirstNamedChild(); !child.isNull(); child = child.getNextNamedSibling())
+            {
+                if (child.getSymbol() == sym)
+                {
+                    return child;
+                }
+            }
+
+            return null();
         }
 
         ////////////////////////////////////////////////////////////////

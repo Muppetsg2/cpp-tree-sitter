@@ -469,3 +469,216 @@ TEST_CASE("Node Cursor Instantiation", "[node][cursor]")
         CHECK_FALSE(cursor.isValid());
     }
 }
+
+TEST_CASE("Node Get Child By Type", "[node][search]")
+{
+    SECTION("Returns null() for an empty/null node")
+    {
+        ts::Node null_node = ts::Node::null();
+        CHECK(null_node.getChildByType("pair").isNull());
+    }
+
+    SECTION("Throws std::length_error when input name exceeds 4GB limit")
+    {
+        ts::Node                         node          = ts::Node::null();
+        const char                      *fake_str      = "fake";
+        constexpr size_t                 overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+
+        CHECK_THROWS_AS(node.getChildByType(huge_view), std::length_error);
+    }
+
+    SECTION("Tree-based lookup using JSON grammar")
+    {
+        ts::Language lang = tree_sitter_json();
+        ts::Parser   parser(lang);
+        std::string  code = R"({"key": 123})";
+        ts::Tree     tree = parser.parseString(code);
+        ts::Node     root = tree.getRootNode();
+
+        // The root is 'document', its first named child is 'object'
+        ts::Node object_node = root.getNamedChild(0);
+        REQUIRE_FALSE(object_node.isNull());
+        REQUIRE(object_node.getType().compare("object") == 0);
+
+        SECTION("Successfully finds a Named Node (AST element)")
+        {
+            // The 'object' node contains a named 'pair' child
+            ts::Node pair_node = object_node.getChildByType("pair");
+            CHECK_FALSE(pair_node.isNull());
+            CHECK(pair_node.getType().compare("pair") == 0);
+            CHECK(pair_node.isNamed() == true);
+        }
+
+        SECTION("Successfully finds an Anonymous Node / Punctuation (CST element)")
+        {
+            // The '{' character is an anonymous node representing punctuation in the JSON grammar
+            ts::Node brace_node = object_node.getChildByType("{");
+            CHECK_FALSE(brace_node.isNull());
+            CHECK(brace_node.getType().compare("{") == 0);
+            CHECK(brace_node.isNamed() == false);
+        }
+
+        SECTION("Returns null() for a valid grammar type that doesn't exist as a child")
+        {
+            // 'array' is a valid JSON grammar type, but not present inside this 'object'
+            ts::Node missing_node = object_node.getChildByType("array");
+            CHECK(missing_node.isNull());
+        }
+
+        SECTION("Returns null() for a completely fictitious type string")
+        {
+            ts::Node missing_node = object_node.getChildByType("non_existent_type_123");
+            CHECK(missing_node.isNull());
+        }
+    }
+}
+
+TEST_CASE("Node Get Child By Symbol", "[node][search]")
+{
+    SECTION("Returns null() for an empty/null node")
+    {
+        ts::Node null_node = ts::Node::null();
+        // Przekazanie dowolnego symbolu (np. 1) do pustego wêz³a
+        CHECK(null_node.getChildBySymbol(1).isNull());
+    }
+
+    SECTION("Tree-based lookup using JSON grammar")
+    {
+        ts::Language lang = tree_sitter_json();
+        ts::Parser   parser(lang);
+        std::string  code = R"({"key": 123})";
+        ts::Tree     tree = parser.parseString(code);
+        ts::Node     root = tree.getRootNode();
+
+        // The root is 'document', its first named child is 'object'
+        ts::Node object_node = root.getNamedChild(0);
+        REQUIRE_FALSE(object_node.isNull());
+
+        SECTION("Successfully finds a Named Node (AST element)")
+        {
+            ts::Symbol pair_symbol = lang.getSymbolForName("pair", true);
+            REQUIRE(pair_symbol != 0);
+
+            ts::Node pair_node = object_node.getChildBySymbol(pair_symbol);
+            CHECK_FALSE(pair_node.isNull());
+            CHECK(pair_node.getType().compare("pair") == 0);
+            CHECK(pair_node.isNamed() == true);
+        }
+
+        SECTION("Successfully finds an Anonymous Node / Punctuation (CST element)")
+        {
+            ts::Symbol brace_symbol = lang.getSymbolForName("{", false);
+            REQUIRE(brace_symbol != 0);
+
+            ts::Node brace_node = object_node.getChildBySymbol(brace_symbol);
+            CHECK_FALSE(brace_node.isNull());
+            CHECK(brace_node.getType().compare("{") == 0);
+            CHECK(brace_node.isNamed() == false);
+        }
+
+        SECTION("Returns null() for a valid grammar symbol that doesn't exist as a child")
+        {
+            ts::Symbol array_symbol = lang.getSymbolForName("array", true);
+            REQUIRE(array_symbol != 0);
+
+            ts::Node missing_node = object_node.getChildBySymbol(array_symbol);
+            CHECK(missing_node.isNull());
+        }
+
+        SECTION("Returns null() when passing symbol 0")
+        {
+            ts::Node missing_node = object_node.getChildBySymbol(0);
+            CHECK(missing_node.isNull());
+        }
+    }
+}
+
+TEST_CASE("Node Get Named Child By Type", "[node][search]")
+{
+    SECTION("Returns null() for an empty/null node")
+    {
+        ts::Node null_node = ts::Node::null();
+        CHECK(null_node.getNamedChildByType("pair").isNull());
+    }
+
+    SECTION("Throws std::length_error when input name exceeds 4GB limit")
+    {
+        ts::Node                         node          = ts::Node::null();
+        const char                      *fake_str      = "fake";
+        constexpr size_t                 overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+
+        CHECK_THROWS_AS(node.getNamedChildByType(huge_view), std::length_error);
+    }
+
+    SECTION("Tree-based strict AST lookup using JSON grammar")
+    {
+        ts::Language lang = tree_sitter_json();
+        ts::Parser   parser(lang);
+        std::string  code = R"({"key": 123})";
+        ts::Tree     tree = parser.parseString(code);
+        ts::Node     root = tree.getRootNode();
+
+        ts::Node object_node = root.getNamedChild(0);
+
+        SECTION("Successfully finds a Named Node")
+        {
+            ts::Node pair_node = object_node.getNamedChildByType("pair");
+            CHECK_FALSE(pair_node.isNull());
+            CHECK(pair_node.getType().compare("pair") == 0);
+            CHECK(pair_node.isNamed() == true);
+        }
+
+        SECTION("Returns null() and ignores Anonymous Nodes (punctuation)")
+        {
+            // Even though '{' is a valid child in the Concrete Syntax Tree (CST),
+            // getNamedChildByType strictly iterates over AST elements. It must ignore it and return null.
+            ts::Node brace_node = object_node.getNamedChildByType("{");
+            CHECK(brace_node.isNull());
+        }
+    }
+}
+
+TEST_CASE("Node Get Named Child By Symbol", "[node][search]")
+{
+    SECTION("Returns null() for an empty/null node")
+    {
+        ts::Node null_node = ts::Node::null();
+        CHECK(null_node.getNamedChildBySymbol(1).isNull());
+    }
+
+    SECTION("Tree-based strict AST lookup using JSON grammar")
+    {
+        ts::Language lang = tree_sitter_json();
+        ts::Parser   parser(lang);
+        std::string  code = R"({"key": 123})";
+        ts::Tree     tree = parser.parseString(code);
+        ts::Node     root = tree.getRootNode();
+
+        ts::Node object_node = root.getNamedChild(0);
+        REQUIRE_FALSE(object_node.isNull());
+
+        SECTION("Successfully finds a Named Node")
+        {
+            ts::Symbol pair_symbol = lang.getSymbolForName("pair", true);
+            REQUIRE(pair_symbol != 0);
+
+            ts::Node pair_node = object_node.getNamedChildBySymbol(pair_symbol);
+            CHECK_FALSE(pair_node.isNull());
+            CHECK(pair_node.getType().compare("pair") == 0);
+            CHECK(pair_node.isNamed() == true);
+        }
+
+        SECTION("Returns null() and ignores Anonymous Nodes (punctuation)")
+        {
+            ts::Symbol brace_symbol = lang.getSymbolForName("{", false);
+            REQUIRE(brace_symbol != 0);
+
+            // getNamedChildBySymbol iterates only over named children,
+            // so passing a symbol for an anonymous node should return null.
+            ts::Node brace_node = object_node.getNamedChildBySymbol(brace_symbol);
+            CHECK(brace_node.isNull());
+        }
+    }
+}
