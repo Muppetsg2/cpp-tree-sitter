@@ -100,7 +100,9 @@ target_link_options(${TARGET_NAME} PRIVATE
 )
 
 if(MSVC)
-    set_property(TARGET ${TARGET_NAME} ${PROJECT_NAME} tree-sitter tree-sitter-json Catch2WithMain Catch2 PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+	set_target_properties(${TARGET_NAME} tree-sitter-json Catch2WithMain Catch2 PROPERTIES 
+		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
+	)
     target_compile_definitions(${TARGET_NAME} PRIVATE NOMINMAX)
 endif()
 

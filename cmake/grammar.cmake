@@ -188,10 +188,6 @@ function(CPPTSAddGrammar)
 
             add_library(${NAME} STATIC "${GRAMMAR_SOURCE_DIR}/src/parser.c" ${maybe_scanner})
 
-		    if(MSVC)
-			    target_compile_definitions(${NAME} PRIVATE NOMINMAX)
-		    endif()
-
             # parser.h is stored within the src directory, so we need to include
             # src in the search paths
             target_include_directories(${NAME} PRIVATE $<BUILD_INTERFACE:${GRAMMAR_SOURCE_DIR}/src>)
@@ -218,6 +214,13 @@ function(CPPTSAddGrammar)
 				    -Wextra
 			    >
 		    )
+
+            if(MSVC)
+			    target_compile_definitions(${NAME} PRIVATE NOMINMAX)
+                set_target_properties(${PROJECT_NAME} PROPERTIES 
+		            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
+	            )
+		    endif()
         endif()
 
         set(${NAME}_ADDED YES)
