@@ -54,11 +54,12 @@ target_link_libraries(demo PRIVATE cpp-tree-sitter tree-sitter-json)
 
 You can set these options using `-DOPTION=VALUE` during the CMake configuration phase.
 
-|         Option        |      Default      |                                  Description                                   |
-|-----------------------|-------------------|--------------------------------------------------------------------------------|
-| `CPP_TS_BUILD_TESTS`  | ON (if top-level) |                       Build unit tests for the library.                        |
-| `CPP_TS_FEATURE_WASM` |        OFF        |               Enable WebAssembly support (requires `wasmtime`).                |
-| `CPP_TS_AMALGAMATED`  |        ON         | Build `tree-sitter` core using the amalgamated `lib.c` for faster compilation. |
+|             Option            |      Default      |                                  Description                                   |
+|:------------------------------|:-----------------:|:-------------------------------------------------------------------------------|
+|     `CPP_TS_BUILD_TESTS`      | ON (if top-level) |                       Build unit tests for the library.                        |
+|     `CPP_TS_FEATURE_WASM`     |        OFF        |               Enable WebAssembly support (requires `wasmtime`).                |
+|     `CPP_TS_AMALGAMATED`      |        ON         | Build `tree-sitter` core using the amalgamated `lib.c` for faster compilation. |
+| `CPP_TS_MSVC_STATIC_RUNTIME`  |        OFF        |                    Link static MSVC runtime (/MT or /MTd).                     |
 
 ### Path Variables
 

@@ -22,6 +22,7 @@ endif()
 option(CPP_TS_BUILD_TESTS "Build test for cpp-tree-sitter" ${CPP_TS_BUILD_TESTS_DEFAULT})
 option(CPP_TS_FEATURE_WASM "Enable the Wasm feature" OFF)
 option(CPP_TS_AMALGAMATED "Build using an amalgamated source" ON)
+option(CPP_TS_MSVC_STATIC_RUNTIME "Use static MSVC runtime (/MT or /MTd)" OFF)
 
 if(DEFINED CPP_TS_WASMTIME_PATH AND NOT CACHE{CPP_TS_WASMTIME_PATH})
 	set(CPP_TS_WASMTIME_PATH "${CPP_TS_WASMTIME_PATH}" CACHE PATH "Path to locally installed wasmtime" FORCE)
@@ -63,6 +64,12 @@ if (tree-sitter_ADDED)
 			-Wextra
 		>
 	)
+
+	if(MSVC)
+		set_target_properties(tree-sitter PROPERTIES 
+			MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
+		)
+	endif()
 endif()
 
 add_library(${PROJECT_NAME} INTERFACE)
@@ -80,6 +87,12 @@ target_compile_options(${PROJECT_NAME} INTERFACE
 		-Wextra
 	>
 )
+
+if(MSVC)
+	set_target_properties(${PROJECT_NAME} PROPERTIES 
+		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
+	)
+endif()
 
 if(CPP_TS_FEATURE_WASM)
 	set(WASMTIME_INCLUDE_DIR "")
