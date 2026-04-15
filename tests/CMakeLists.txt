@@ -3,7 +3,6 @@ set(CPP_TS_TEST_CXX_STANDARD 20 CACHE STRING "C++ standard for tests" FORCE)
 
 set(PCH_FILE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp)
 set(TARGET_NAME ${PROJECT_NAME}-tests)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 file(GLOB_RECURSE TESTS_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
@@ -71,6 +70,14 @@ if(Catch2_ADDED)
         PATHS ${Catch2_BINARY_DIR}/src
         POST_BUILD
     )
+	
+	if(MSVC)
+		set_target_properties(Catch2WithMain Catch2 PROPERTIES 
+			MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
+		)
+		target_compile_definitions(Catch2 PRIVATE NOMINMAX)
+		target_compile_definitions(Catch2WithMain PRIVATE NOMINMAX)
+	endif()
 endif()
 
 target_compile_options(${TARGET_NAME} PRIVATE
@@ -100,7 +107,7 @@ target_link_options(${TARGET_NAME} PRIVATE
 )
 
 if(MSVC)
-	set_target_properties(${TARGET_NAME} tree-sitter-json Catch2WithMain Catch2 PROPERTIES 
+	set_target_properties(${TARGET_NAME} PROPERTIES 
 		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 	)
     target_compile_definitions(${TARGET_NAME} PRIVATE NOMINMAX)

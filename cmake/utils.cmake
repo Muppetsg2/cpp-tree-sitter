@@ -1,3 +1,16 @@
+set(CPP_TS_COMPILE_OPTIONS
+	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+		/W4
+		/Zc:__cplusplus
+	>
+	$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+		-Wno-unused-but-set-variable
+		-Wno-conversion
+		-Wall
+		-Wextra
+	>
+)
+
 function(find_and_copy_lib)
 	set(options POST_BUILD)
 	set(oneValueArgs TARGET)
