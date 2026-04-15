@@ -52,20 +52,10 @@ if (tree-sitter_ADDED)
     add_library(tree-sitter STATIC ${TREE_SITTER_SOURCE_FILES})
     target_include_directories(tree-sitter PRIVATE $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/src> $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/src/wasm>)
     target_include_directories(tree-sitter PUBLIC  $<INSTALL_INTERFACE:include> $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/include>)
-    target_compile_options(tree-sitter PRIVATE 
-		$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
-			/W4
-			/Zc:__cplusplus
-		>
-		$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-			-Wno-unused-but-set-variable
-			-Wno-conversion
-			-Wall
-			-Wextra
-		>
-	)
+    target_compile_options(tree-sitter PRIVATE ${CPP_TS_COMPILE_OPTIONS})
 
 	if(MSVC)
+		target_compile_definitions(tree-sitter PRIVATE NOMINMAX)
 		set_target_properties(tree-sitter PROPERTIES 
 			MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 		)
@@ -75,20 +65,10 @@ endif()
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 target_link_libraries(${PROJECT_NAME} INTERFACE tree-sitter)
-target_compile_options(${PROJECT_NAME} INTERFACE 
-	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
-		/W4
-		/Zc:__cplusplus
-	>
-	$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-		-Wno-unused-but-set-variable
-		-Wno-conversion
-		-Wall
-		-Wextra
-	>
-)
+target_compile_options(${PROJECT_NAME} INTERFACE ${CPP_TS_COMPILE_OPTIONS})
 
 if(MSVC)
+	target_compile_definitions(${PROJECT_NAME} INTERFACE NOMINMAX)
 	set_target_properties(${PROJECT_NAME} PROPERTIES 
 		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 	)

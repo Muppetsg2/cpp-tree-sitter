@@ -202,22 +202,11 @@ function(CPPTSAddGrammar)
                 endif()
             endforeach()
 		
-            target_compile_options(${NAME} PRIVATE 
-			    $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
-				    /W4
-				    /Zc:__cplusplus
-			    >
-			    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-				    -Wno-unused-but-set-variable
-				    -Wno-conversion
-				    -Wall
-				    -Wextra
-			    >
-		    )
+            target_compile_options(${NAME} PRIVATE ${CPP_TS_COMPILE_OPTIONS})
 
             if(MSVC)
 			    target_compile_definitions(${NAME} PRIVATE NOMINMAX)
-                set_target_properties(${PROJECT_NAME} PROPERTIES 
+                set_target_properties(${NAME} PROPERTIES 
 		            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 	            )
 		    endif()
