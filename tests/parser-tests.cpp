@@ -19,6 +19,14 @@
 #include <string>
 #include <vector>
 
+#if TS_TEST_HAS_CXX20
+#include <span>
+#endif
+
+#if TS_TEST_HAS_CXX23
+#include <expected>
+#endif
+
 extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("Parser and Tree lifecycle", "[parser]")
@@ -102,7 +110,7 @@ TEST_CASE("Parser Progress Callback", "[parser]")
         *read = (byte < code.size()) ? 1 : 0;
         return ts::details::make_view(code.c_str() + byte, *read);
     };
-#if TEST_HAS_CXX17
+#if TS_TEST_HAS_CXX17
     ts::Tree tree = parser.parse(input, {}, options);
 #else
     ts::Tree tree = parser.parse(input, nullptr, &options);
@@ -136,7 +144,13 @@ TEST_CASE("Parser Configuration and Language", "[parser]")
     {
         CHECK(parser.getCurrentLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());
 
+#if TS_TEST_HAS_CXX23
+        auto res = parser.setLanguage(lang);
+        CHECK(res.has_value());
+        CHECK(res.value());
+#else
         CHECK(parser.setLanguage(lang));
+#endif
 
         parser.reset();
         CHECK(parser.getCurrentLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());
@@ -168,7 +182,7 @@ TEST_CASE("Parser Encoded Strings", "[parser]")
                             { 0, 4 }, { 0, 5 }, { 0, 5 } };
         old_tree.edit(edit);
 
-#if TEST_HAS_CXX17
+#if TS_TEST_HAS_CXX17
         ts::Tree new_tree = parser.parseStringEncoded(new_code, ts::InputEncoding::UTF8, old_tree);
 #else
         ts::Tree new_tree = parser.parseStringEncoded(new_code, ts::InputEncoding::UTF8, &old_tree);
@@ -350,7 +364,11 @@ TEST_CASE("Parser Included Ranges - Reset to full document", "[parser][range]")
         // Restrict the parser to a specific narrow range (e.g., just the number '2')
         ts::Range narrow_range{ ts::Extent<ts::Point>{ { 0, 4 }, { 0, 5 } }, ts::Extent<uint32_t>{ 4, 5 } };
 
+#if TS_TEST_HAS_CXX20
+        REQUIRE(parser.setIncludedRanges(std::span<const ts::Range>{ &narrow_range, 1 }));
+#else
         REQUIRE(parser.setIncludedRanges({ narrow_range }));
+#endif
 
         // Pass an empty vector to tell the parser to evaluate the entire document again
         std::vector<ts::Range> empty_ranges;
@@ -368,3 +386,40 @@ TEST_CASE("Parser Included Ranges - Reset to full document", "[parser][range]")
         CHECK(parser.getIncludedRanges().size() == 1);
     }
 }
+
+#if TS_TEST_HAS_CXX23
+TEST_CASE("Parser C++23 Specific Features", "[parser][cxx23]")
+{
+    ts::Language lang = tree_sitter_json();
+
+    SECTION("Static factory create() success")
+    {
+        auto result = ts::Parser::create(lang);
+        REQUIRE(result.has_value());
+
+        ts::Parser parser = std::move(result.value());
+        CHECK(parser.hasLanguage());
+
+        ts::Tree tree = parser.parseString("{}");
+        CHECK_FALSE(tree.hasError());
+    }
+
+    SECTION("Static factory create() with invalid language")
+    {
+        ts::Language invalid_lang(nullptr);
+        auto         result = ts::Parser::create(invalid_lang);
+
+        REQUIRE_FALSE(result.has_value());
+        CHECK_THAT(result.error(), Catch::Matchers::ContainsSubstring("invalid"));
+    }
+
+    SECTION("setLanguage return type in C++23")
+    {
+        ts::Parser parser;
+        auto       res = parser.setLanguage(lang);
+
+        REQUIRE(res.has_value());
+        CHECK(parser.hasLanguage());
+    }
+}
+#endif

@@ -6,7 +6,7 @@ It provides a clean, RAII-compliant interface and robust CMake integration to si
 
 ## Key Features
 * **Modern RAII API:** Automatic memory management for `Parsers`, `Trees`, `Nodes`, and `Cursors` using standard smart pointers.
-* **Broad Compatibility:** Supports **C++11, C++14, C++17, and C++20**. It automatically leverages modern features like `std::string_view` and `std::concepts` if available, while providing fallbacks for older standards.
+* **Broad Compatibility:** Supports **C++11, C++14, C++17, C++20 and C++23**. It automatically leverages modern features like `std::string_view`, `std::concepts` and `std::expected` if available, while providing fallbacks for older standards.
 * **STL-style Iterators:** Use standard `for` loops to iterate over child nodes.
 * **Tree Visitor:** A built-in Depth-First Search (DFS) visitor (`ts::visit`) for easy tree traversal.
 * **Wasm Support:** High-level wrappers for WebAssembly-based grammars.
@@ -14,7 +14,7 @@ It provides a clean, RAII-compliant interface and robust CMake integration to si
 * **CMake Integration:** Seamless dependency management via [CPM.cmake](https://github.com/cpm-cmake/cpm.cmake).
 
 ## Requirements
-* **Compiler:** C++11 compatible or newer (C++17/20 recommended).
+* **Compiler:** C++11 compatible or newer (C++20/23 recommended).
 * **Build System:** [CMake](https://cmake.org/) 3.30 or newer.
 
 ## Using in a CMake Project
@@ -25,7 +25,7 @@ cmake_minimum_required(VERSION 3.30)
 
 project(MyParser)
 
-set(CMAKE_CXX_STANDARD 17) # Works with 11, 14, 17, 20
+set(CMAKE_CXX_STANDARD 17) # Works with 11, 14, 17, 20, 23
 
 include(cmake/CPM.cmake)
 
@@ -136,7 +136,7 @@ int main() {
 While the original project provided basic wrappers, this fork implements a **Full RAII** architecture. It uses specialized `FreeHelper` functors for C-allocated `strings` and `shared_ptr` for `Language` objects to prevent use-after-free errors.
 
 ### Compatibility Layer
-The library now features a custom `StringView` for C++11/14 environments and detects standard versions to enable `std::optional` or C++20 `concepts` dynamically.
+The library now features a custom `StringView` for C++11/14 environments and detects standard versions to enable `std::optional`, C++20 `concepts` or C++23 `std::expected` dynamically.
 
 ### Extended API
 * **Queries:** Added `Query` and `QueryCursor` classes to perform pattern matching.
@@ -146,7 +146,7 @@ The library now features a custom `StringView` for C++11/14 environments and det
 ### Comparison Table
 |      Feature     |   Original Fork  |               This Fork               |
 |:-----------------|:-----------------|:--------------------------------------|
-| **C++ Standard** |    C++17 only    |          C++11 through C++20          |
+| **C++ Standard** |    C++17 only    |          C++11 through C++23          |
 |   **Traversal**  | Manual/Iterators |          Iterators + Visitor          |
 |    **Queries**   |        No        |             Yes (Full API)            |
 | **Wasm Support** |        No        |                  Yes                  |

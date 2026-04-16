@@ -3,6 +3,7 @@
 #define CPP_TREE_SITTER_HPP
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +30,7 @@
 
 #define TS_HAS_CXX17 (TS_CXX_LEVEL >= 201703L)
 #define TS_HAS_CXX20 (TS_CXX_LEVEL >= 202002L)
+#define TS_HAS_CXX23 (TS_CXX_LEVEL >= 202302L)
 
 #if TS_HAS_CXX17
 #include <filesystem>
@@ -40,6 +42,12 @@
 
 #if TS_HAS_CXX20
 #include <concepts>
+#include <ranges>
+#include <span>
+#endif
+
+#if TS_HAS_CXX23
+#include <expected>
 #endif
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
@@ -86,7 +94,7 @@ namespace ts
         constexpr StringView() noexcept : data_(nullptr), size_(0)
         {}
 
-        constexpr StringView(const char *s, size_t count) : data_(s), size_(count)
+        constexpr StringView(const char *s, size_t count) noexcept : data_(s), size_(count)
         {}
 
         StringView(const char *s) : data_(s), size_(s ? std::strlen(s) : 0)
@@ -272,14 +280,9 @@ namespace ts
 
         struct QueryErrorHelper
         {
-            static void validate(uint32_t error_offset, TSQueryError &error)
+            static std::string format_error(uint32_t error_offset, const TSQueryError &error)
             {
-                if (error == TSQueryErrorNone)
-                {
-                    return;
-                }
-
-                StringViewReturn type_name;
+                std::string type_name;
                 switch (error)
                 {
                     case TSQueryErrorSyntax:
@@ -304,22 +307,26 @@ namespace ts
                         type_name = "Unknown";
                         break;
                 }
+                return "Tree-sitter Query Error at offset " + std::to_string(error_offset) + " (Type: " + type_name
+                     + ")";
+            }
 
-                throw std::runtime_error("Tree-sitter Query Error at offset " + std::to_string(error_offset)
-                                         + " (Type: " + std::string(type_name) + ")");
+            static void validate(uint32_t error_offset, TSQueryError &error)
+            {
+                if (error == TSQueryErrorNone)
+                {
+                    return;
+                }
+
+                throw std::runtime_error(format_error(error_offset, error));
             }
         };
 
 #if defined(CPP_TREE_SITTER_FEATURE_WASM)
         struct WasmErrorHelper
         {
-            static void validate(TSWasmError &error)
+            static std::string format_error(const TSWasmError &error)
             {
-                if (error.kind == TSWasmErrorKindNone)
-                {
-                    return;
-                }
-
                 StringViewReturn kind_name;
                 switch (error.kind)
                 {
@@ -342,12 +349,25 @@ namespace ts
 
                 std::string message = error.message ? error.message : "No message";
 
+                return "Tree-sitter Wasm Error [" + std::string(kind_name) + "]: " + message;
+            }
+
+            static void validate(TSWasmError &error)
+            {
+                if (error.kind == TSWasmErrorKindNone)
+                {
+                    return;
+                }
+
+                std::string err_msg = format_error(error);
+
                 if (error.message)
                 {
                     std::free(error.message);
                 }
 
-                throw std::runtime_error("Tree-sitter Wasm Error [" + std::string(kind_name) + "]: " + message);
+
+                throw std::runtime_error(err_msg);
             }
         };
 
@@ -381,7 +401,7 @@ namespace ts
             return str ? StringViewReturn(str) : StringViewReturn();
         }
 
-        [[nodiscard]] inline StringViewReturn make_view(const char *str, uint32_t length)
+        [[nodiscard]] inline StringViewReturn make_view(const char *str, size_t length) noexcept
         {
             return (str && length > 0) ? StringViewReturn(str, length) : StringViewReturn();
         }
@@ -537,10 +557,10 @@ namespace ts
         Point() noexcept : row(0), column(0)
         {}
 
-        Point(uint32_t row_value, uint32_t column_value) : row(row_value), column(column_value)
+        Point(uint32_t row_value, uint32_t column_value) noexcept : row(row_value), column(column_value)
         {}
 
-        Point(const TSPoint &other) : row(other.row), column(other.column)
+        Point(const TSPoint &other) noexcept : row(other.row), column(other.column)
         {}
 
         ////////////////////////////////////////////////////////////////
@@ -559,10 +579,12 @@ namespace ts
             return row == other.row && column == other.column;
         }
 
+#if !TS_HAS_CXX20
         [[nodiscard]] bool operator!=(const Point &other) const noexcept
         {
             return !(*this == other);
         }
+#endif
 
         [[nodiscard]] bool operator>(const Point &other) const noexcept
         {
@@ -617,7 +639,7 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        InputEdit()
+        InputEdit() noexcept
             : start_byte(0)
             , old_end_byte(0)
             , new_end_byte(0)
@@ -631,7 +653,7 @@ namespace ts
                   uint32_t new_end_byte_value,
                   Point    start_point_value,
                   Point    old_end_point_value,
-                  Point    new_end_point_value)
+                  Point    new_end_point_value) noexcept
             : start_byte(start_byte_value)
             , old_end_byte(old_end_byte_value)
             , new_end_byte(new_end_byte_value)
@@ -640,7 +662,7 @@ namespace ts
             , new_end_point(new_end_point_value)
         {}
 
-        explicit InputEdit(const TSInputEdit &edit)
+        explicit InputEdit(const TSInputEdit &edit) noexcept
             : start_byte(edit.start_byte)
             , old_end_byte(edit.old_end_byte)
             , new_end_byte(edit.new_end_byte)
@@ -653,13 +675,14 @@ namespace ts
         // Validation
         ////////////////////////////////////////////////////////////////
 
+        [[nodiscard]] bool isValid() const noexcept
+        {
+            return start_byte <= old_end_byte && Point::is_valid_range(start_point, old_end_point);
+        }
+
         [[nodiscard]] void validate() const
         {
-            bool bytes_invalid = start_byte > old_end_byte;
-
-            bool points_invalid = !Point::is_valid_range(start_point, old_end_point);
-
-            if (bytes_invalid || points_invalid)
+            if (!isValid())
             {
                 throw std::invalid_argument("Tree-sitter: Invalid edit ranges (start > old_end)");
             }
@@ -702,10 +725,11 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        explicit Range(Extent<Point> point_value, Extent<uint32_t> byte_value) : point(point_value), byte(byte_value)
+        explicit Range(Extent<Point> point_value, Extent<uint32_t> byte_value) noexcept
+            : point(point_value), byte(byte_value)
         {}
 
-        explicit Range(const TSRange &range)
+        explicit Range(const TSRange &range) noexcept
             : point(range.start_point, range.end_point), byte(range.start_byte, range.end_byte)
         {}
 
@@ -879,9 +903,18 @@ namespace ts
             is_valid = language != nullptr;
         }
 
-        Language(const Language &other) noexcept : Language(ts_language_copy(other.impl.get()))
+        Language(const Language &other) noexcept
         {
-            is_valid = other.impl.get() != nullptr;
+            is_valid = other.is_valid;
+            if (is_valid && other.impl.get() != nullptr)
+            {
+                impl = { ts_language_copy(other.impl.get()), [](const TSLanguage *l) { ts_language_delete(l); } };
+            }
+            else
+            {
+                is_valid = false;
+                impl.reset();
+            }
         }
 
         Language(Language &&other) noexcept = default;
@@ -1137,8 +1170,16 @@ namespace ts
         {
             if (this != &other)
             {
-                is_valid = other.impl.get() != nullptr;
-                impl     = { ts_language_copy(other.impl.get()), [](const TSLanguage *l) { ts_language_delete(l); } };
+                is_valid = other.is_valid;
+                if (is_valid && other.impl.get() != nullptr)
+                {
+                    impl = { ts_language_copy(other.impl.get()), [](const TSLanguage *l) { ts_language_delete(l); } };
+                }
+                else
+                {
+                    is_valid = false;
+                    impl.reset();
+                }
             }
             return *this;
         }
@@ -1326,29 +1367,29 @@ namespace ts
             return isNull() ? 0 : ts_node_child_count(impl);
         }
 
-        [[nodiscard]] Node getChild(uint32_t child_index) const
+        [[nodiscard]] Node getChild(uint32_t child_index) const noexcept
         {
             if (child_index >= getChildCount())
             {
-                throw std::out_of_range("Tree-sitter: Child index out of bounds");
+                return null();
             }
 
             return Node{ ts_node_child(impl, child_index) };
         }
 
-        [[nodiscard]] Node getFirstChild() const
+        [[nodiscard]] Node getFirstChild() const noexcept
         {
             return getChild(0);
         }
 
-        [[nodiscard]] Node getLastChild() const
+        [[nodiscard]] Node getLastChild() const noexcept
         {
             uint32_t count = getChildCount();
 
             return getChild(count > 0 ? count - 1 : count);
         }
 
-        [[nodiscard]] Node getChildWithDescendant(Node descendant) const
+        [[nodiscard]] Node getChildWithDescendant(Node descendant) const noexcept
         {
             if (isNull() || descendant.isNull())
             {
@@ -1445,22 +1486,22 @@ namespace ts
             return isNull() ? 0 : ts_node_named_child_count(impl);
         }
 
-        [[nodiscard]] Node getNamedChild(uint32_t child_index) const
+        [[nodiscard]] Node getNamedChild(uint32_t child_index) const noexcept
         {
             if (child_index >= getNamedChildCount())
             {
-                throw std::out_of_range("Tree-sitter: Named Child index out of bounds");
+                return null();
             }
 
             return Node{ ts_node_named_child(impl, child_index) };
         }
 
-        [[nodiscard]] Node getFirstNamedChild() const
+        [[nodiscard]] Node getFirstNamedChild() const noexcept
         {
             return getNamedChild(0);
         }
 
-        [[nodiscard]] Node getLastNamedChild() const
+        [[nodiscard]] Node getLastNamedChild() const noexcept
         {
             uint32_t count = getNamedChildCount();
 
@@ -1636,10 +1677,12 @@ namespace ts
             return ts_node_eq(impl, other.impl);
         }
 
+#if !TS_HAS_CXX20
         [[nodiscard]] bool operator!=(const Node &other) const noexcept
         {
             return !(*this == other);
         }
+#endif
 
         TSNode impl;
     };
@@ -1663,14 +1706,15 @@ namespace ts
 
         Tree(const Tree &other) noexcept
         {
-            is_valid = other.impl.get() != nullptr;
-            if (!is_valid)
+            is_valid = other.is_valid;
+            if (is_valid && other.impl.get() != nullptr)
             {
-                impl.reset(nullptr);
+                impl.reset(ts_tree_copy(other.impl.get()));
             }
             else
             {
-                impl.reset(ts_tree_copy(other.impl.get()));
+                is_valid = false;
+                impl.reset();
             }
         }
 
@@ -1682,11 +1726,7 @@ namespace ts
 
         [[nodiscard]] bool hasError() const noexcept
         {
-            if (!is_valid)
-            {
-                return false;
-            }
-            return getRootNode().hasError();
+            return is_valid && getRootNode().hasError();
         }
 
         [[nodiscard]] bool isValid() const noexcept
@@ -1875,14 +1915,15 @@ namespace ts
         {
             if (this != &other)
             {
-                is_valid = other.impl.get() != nullptr;
-                if (!is_valid)
+                is_valid = other.is_valid;
+                if (is_valid && other.impl.get() != nullptr)
                 {
-                    impl.reset(nullptr);
+                    impl.reset(ts_tree_copy(other.impl.get()));
                 }
                 else
                 {
-                    impl.reset(ts_tree_copy(other.impl.get()));
+                    is_valid = false;
+                    impl.reset();
                 }
             }
             return *this;
@@ -1918,7 +1959,7 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        Parser() : impl{ ts_parser_new(), ts_parser_delete }
+        Parser() noexcept : impl{ ts_parser_new(), ts_parser_delete }
         {}
 
         Parser(Language language) : impl{ ts_parser_new(), ts_parser_delete }
@@ -1927,7 +1968,18 @@ namespace ts
             {
                 throw std::runtime_error("Tree-sitter: Passed Language for Parser was invalid");
             }
-            static_cast<void>(setLanguage(language));
+
+#if TS_HAS_CXX23
+            if (auto res = setLanguage(language); !res.has_value())
+            {
+                throw std::runtime_error(res.error());
+            }
+#else
+            if (!setLanguage(language))
+            {
+                throw std::runtime_error("Tree-sitter: Couldn't set language (version mismatch)");
+            }
+#endif
         }
 
 #if defined(CPP_TREE_SITTER_FEATURE_WASM)
@@ -1939,28 +1991,87 @@ namespace ts
             }
 
             setWasmStore(store);
-            setLanguage(language);
+
+#if TS_HAS_CXX23
+            if (auto res = setLanguage(language); !res.has_value())
+            {
+                throw std::runtime_error(res.error());
+            }
+#else
+            if (!setLanguage(language))
+            {
+                throw std::runtime_error("Tree-sitter: Couldn't set language (version mismatch)");
+            }
+#endif
         }
+#endif
+
+#if TS_HAS_CXX23
+        [[nodiscard]] static inline std::expected<Parser, std::string> create(Language language) noexcept
+        {
+            if (!language.isValid())
+            {
+                return std::unexpected("Tree-sitter: Passed Language for Parser was invalid");
+            }
+
+            Parser parser;
+            if (auto res = parser.setLanguage(language); !res.has_value())
+            {
+                return std::unexpected(res.error());
+            }
+
+            return parser;
+        }
+
+#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+        [[nodiscard]] static inline std::expected<Parser, std::string> create(Language   language,
+                                                                              WasmStore &store) noexcept;
+#endif
 #endif
 
         ////////////////////////////////////////////////////////////////
         // Configuration
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] bool setLanguage(Language language)
+        [[nodiscard]]
+#if TS_HAS_CXX23
+        std::expected<bool, std::string> setLanguage(Language language)
         {
 #if defined(CPP_TREE_SITTER_FEATURE_WASM)
             if (language.isWasm() && !wasm_store_set)
             {
-                throw std::logic_error("Tree-sitter: Parser needs WasmStore to process Wasm Language");
+                return std::unexpected("Tree-sitter: Parser needs WasmStore to process Wasm Language");
             }
 #endif
-
             language_set = ts_parser_set_language(impl.get(), language);
+            if (!language_set)
+            {
+                return std::unexpected("Tree-sitter: Language version mismatch (ABI incompatibility)");
+            }
+#else
+        bool setLanguage(Language language)
+#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+        {
+            if (language.isWasm() && !wasm_store_set)
+            {
+                throw std::logic_error("Tree-sitter: Parser needs WasmStore to process Wasm Language");
+            }
+
+#else
+                noexcept
+        {
+#endif
+            language_set = ts_parser_set_language(impl.get(), language);
+#endif
             return language_set;
         }
 
-        [[nodiscard]] bool setIncludedRanges(const std::vector<Range> &ranges)
+        [[nodiscard]]
+#if TS_HAS_CXX20
+        bool setIncludedRanges(std::span<const Range> ranges)
+#else
+        bool setIncludedRanges(const std::vector<Range> &ranges)
+#endif
         {
             if (ranges.empty())
             {
@@ -2268,6 +2379,9 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
+        TreeCursor() noexcept : is_valid(false), impl({})
+        {}
+
         explicit TreeCursor(TSNode node) noexcept
         {
             is_valid = !ts_node_is_null(node);
@@ -2485,10 +2599,12 @@ namespace ts
             return getCurrentNode() == other.getCurrentNode();
         }
 
+#if !TS_HAS_CXX20
         [[nodiscard]] bool operator!=(const TreeCursor &other) const noexcept
         {
             return !(*this == other);
         }
+#endif
 
         TreeCursor &operator=(const TreeCursor &other) = delete;
 
@@ -2520,6 +2636,9 @@ namespace ts
     {
         Node     node;
         uint32_t index;
+
+        QueryCapture() noexcept : node(Node::null()), index(0)
+        {}
 
         // For easy conversion from C API
         QueryCapture(const TSQueryCapture &capture) noexcept : node(capture.node), index(capture.index)
@@ -2581,8 +2700,8 @@ namespace ts
 
     struct QueryPredicateStep
     {
-        QueryPredicateStepType type;
         uint32_t               value_id;
+        QueryPredicateStepType type;
 
         QueryPredicateStep(const TSQueryPredicateStep *predicate_step) noexcept
             : type(static_cast<QueryPredicateStepType>(predicate_step->type)), value_id(predicate_step->value_id)
@@ -2635,6 +2754,48 @@ namespace ts
 
             impl.reset(query);
         }
+
+#if TS_HAS_CXX23
+        [[nodiscard]] static inline std::expected<Query, std::string> create(
+                Language                     language,
+                details::StringViewParameter source) noexcept
+        {
+            if (!language.isValid())
+            {
+                return std::unexpected("Tree-sitter: Passed Language for Query was invalid");
+            }
+
+            if (source.size() > std::numeric_limits<uint32_t>::max())
+            {
+                return std::unexpected("Tree-sitter: Input source exceeds maximum size of 4GB");
+            }
+
+            uint32_t     error_offset;
+            TSQueryError error_type;
+
+            TSQuery *query = ts_query_new(language,
+                                          source.data(),
+                                          static_cast<uint32_t>(source.size()),
+                                          &error_offset,
+                                          &error_type);
+
+            if (error_type != TSQueryErrorNone)
+            {
+                if (query)
+                {
+                    ts_query_delete(query);
+                }
+                return std::unexpected(details::QueryErrorHelper::format_error(error_offset, error_type));
+            }
+
+            if (!query)
+            {
+                return std::unexpected("Tree-sitter: Failed to create Query");
+            }
+
+            return Query(query);
+        }
+#endif
 
         ////////////////////////////////////////////////////////////////
         // Counts
@@ -2708,11 +2869,11 @@ namespace ts
         // Capture & String Resolution
         ////////////////////////////////////////////////////////////////
 
-        [[nodiscard]] details::StringViewReturn getCaptureNameForID(uint32_t id) const
+        [[nodiscard]] details::StringViewReturn getCaptureNameForID(uint32_t id) const noexcept
         {
             uint32_t    length;
             const char *name = ts_query_capture_name_for_id(impl.get(), id, &length);
-            return details::make_view(name, length);
+            return details::make_view(name, static_cast<size_t>(length));
         }
 
         [[nodiscard]] Quantifier getCaptureQuantifierForID(uint32_t pattern_index, uint32_t capture_index) const
@@ -2721,11 +2882,11 @@ namespace ts
                     ts_query_capture_quantifier_for_id(impl.get(), pattern_index, capture_index));
         }
 
-        [[nodiscard]] details::StringViewReturn getStringValueForID(uint32_t id) const
+        [[nodiscard]] details::StringViewReturn getStringValueForID(uint32_t id) const noexcept
         {
             uint32_t    length;
             const char *name = ts_query_string_value_for_id(impl.get(), id, &length);
-            return details::make_view(name, length);
+            return details::make_view(name, static_cast<size_t>(length));
         }
 
         ////////////////////////////////////////////////////////////////
@@ -2758,6 +2919,11 @@ namespace ts
 
     private:
         std::unique_ptr<TSQuery, decltype(&ts_query_delete)> impl{ nullptr, ts_query_delete };
+
+#if TS_HAS_CXX23
+        explicit Query(TSQuery *raw_query) : impl(raw_query, ts_query_delete)
+        {}
+#endif
     };
 
     /////////////////////////////////////////////////////////////////////////////
@@ -3031,6 +3197,30 @@ namespace ts
         WasmStore(const WasmStore &)     = delete;
         WasmStore(WasmStore &&) noexcept = default;
 
+#if TS_HAS_CXX23
+        [[nodiscard]] static std::expected<WasmStore, std::string> create(WasmEngine *engine) noexcept
+        {
+            TSWasmError  error{ TSWasmErrorKindNone, nullptr };
+            TSWasmStore *store = ts_wasm_store_new(engine, &error);
+
+            if (error.kind != TSWasmErrorKindNone)
+            {
+                std::string err_msg = details::WasmErrorHelper::format_error(error);
+                if (error.message)
+                {
+                    std::free(error.message);
+                }
+                return std::unexpected(err_msg);
+            }
+
+            if (!store)
+            {
+                return std::unexpected("Tree-sitter: Failed to create Wasm store");
+            }
+
+            return WasmStore(store);
+        }
+#endif
 
         //////////////////////////////////////////////////////////////
         // Methods
@@ -3095,6 +3285,78 @@ namespace ts
             return loadLanguage(lang_name, buffer);
         }
 
+#if TS_HAS_CXX23
+        [[nodiscard]] std::expected<Language, std::string> loadLanguageExpected(
+                details::StringViewParameter name,
+                details::StringViewParameter wasm_buffer) noexcept
+        {
+            if (!is_valid)
+            {
+                return std::unexpected("Tree-sitter: Wasm Store is invalid");
+            }
+
+            if (wasm_buffer.size() > std::numeric_limits<uint32_t>::max())
+            {
+                return std::unexpected("Tree-sitter: Input wasm_buffer exceeds maximum size of 4GB");
+            }
+
+            TSWasmError       error{ TSWasmErrorKindNone, nullptr };
+            const TSLanguage *lang = ts_wasm_store_load_language(impl.get(),
+                                                                 name.data(),
+                                                                 wasm_buffer.data(),
+                                                                 static_cast<uint32_t>(wasm_buffer.size()),
+                                                                 &error);
+
+            if (error.kind != TSWasmErrorKindNone)
+            {
+                std::string err_msg = details::WasmErrorHelper::format_error(error);
+                if (error.message)
+                {
+                    std::free(error.message);
+                }
+                return std::unexpected(err_msg);
+            }
+
+            return Language{ lang };
+        }
+
+        [[nodiscard]] std::expected<Language, std::string> loadLanguageExpected(details::StringViewParameter file_path)
+        {
+            if (!is_valid)
+            {
+                return std::unexpected("Tree-sitter: Wasm Store is invalid");
+            }
+
+            if (file_path.size() > std::numeric_limits<uint32_t>::max())
+            {
+                return std::unexpected("Tree-sitter: Input file_path exceeds maximum size of 4GB");
+            }
+
+            const std::string path(file_path);
+            std::ifstream     file(path, std::ios::binary | std::ios::ate);
+            if (!file.is_open())
+            {
+                return std::unexpected("Tree-sitter: Failed to open wasm file: " + path);
+            }
+
+            file.seekg(0, std::ios::end);
+            std::streamsize size = file.tellg();
+            if (size < 0)
+            {
+                return std::unexpected("Tree-sitter: Failed to determine file size: " + path);
+            }
+            file.seekg(0, std::ios::beg);
+
+            std::string buffer;
+            buffer.reserve(static_cast<size_t>(size));
+            buffer.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+            std::string lang_name = details::get_grammar_name_from_file(path);
+
+            return loadLanguageExpected(lang_name, buffer);
+        }
+#endif
+
         [[nodiscard]] size_t getLanguageCount() const
         {
             if (!is_valid)
@@ -3154,6 +3416,26 @@ namespace ts
         wasm_store_set         = false;
         return WasmStore{ raw_store };
     }
+
+#if TS_HAS_CXX23
+    [[nodiscard]] inline std::expected<Parser, std::string> Parser::create(Language language, WasmStore &store) noexcept
+    {
+        if (!language.isValid())
+        {
+            return std::unexpected("Tree-sitter: Passed Language for Parser was invalid");
+        }
+
+        Parser parser;
+        parser.setWasmStore(store);
+        if (auto res = parser.setLanguage(language); !res.has_value())
+        {
+            store = parser.takeWasmStore();
+            return std::unexpected(res.error());
+        }
+
+        return parser;
+    }
+#endif
 #endif
 
     /////////////////////////////////////////////////////////////////////////////
@@ -3172,7 +3454,7 @@ namespace ts
         ////////////////////////////////////////////////////////////////
 
         using value_type        = ts::Node;
-        using difference_type   = int;
+        using difference_type   = std::ptrdiff_t;
         using iterator_category = std::input_iterator_tag;
 
         class Child
@@ -3181,15 +3463,22 @@ namespace ts
             explicit Child(value_type v) noexcept : value(v)
             {}
 
+#if TS_HAS_CXX23
+            template <typename Self>
+            auto *operator->(this Self &&self) noexcept
+            {
+                return &self.value;
+            }
+#else
             const value_type *operator->() const noexcept
             {
                 return &value;
             }
-
             value_type *operator->() noexcept
             {
                 return &value;
             }
+#endif
 
         private:
             value_type value;
@@ -3199,22 +3488,40 @@ namespace ts
         // Lifecycle
         ////////////////////////////////////////////////////////////////
 
-        explicit ChildIterator(const ts::Node &node) noexcept
-            : cursor{ node.getCursor() }, atEnd{ !cursor.gotoFirstChild() }
+        ChildIterator() : atEnd(true)
         {}
+
+        explicit ChildIterator(const ts::Node &node) noexcept
+            : cursor{ node.getCursor() }, atEnd{ node.isNull() || !cursor.gotoFirstChild() }
+        {}
+
+        ChildIterator(const ChildIterator &)     = delete;
+        ChildIterator(ChildIterator &&) noexcept = default;
 
         ////////////////////////////////////////////////////////////////
         // Get
         ////////////////////////////////////////////////////////////////
 
-        value_type operator*() const noexcept
+        [[nodiscard]] value_type get() const noexcept
         {
             return cursor.getCurrentNode();
+        }
+
+        [[nodiscard]] value_type operator*() const noexcept
+        {
+            return get();
         }
 
         ////////////////////////////////////////////////////////////////
         // Advance
         ////////////////////////////////////////////////////////////////
+
+        Child operator->() const noexcept
+        {
+            // Dereference this iterator to get the value,
+            // then wrap it in the safe proxy.
+            return Child(get());
+        }
 
         ChildIterator &operator++() noexcept
         {
@@ -3222,56 +3529,66 @@ namespace ts
             return *this;
         }
 
-        Child operator->() const noexcept
-        {
-            // Dereference this iterator to get the value,
-            // then wrap it in the safe proxy.
-            return Child(**this);
-        }
-
         ChildIterator &operator++(int) noexcept
         {
-            atEnd = !cursor.gotoNextSibling();
-            return *this;
+            return ++(*this);
         }
 
         ////////////////////////////////////////////////////////////////
         // Comparision
         ////////////////////////////////////////////////////////////////
 
-        friend bool operator==(const ChildIterator &a, const ChildIteratorSentinel &) noexcept
+        [[nodiscard]] friend bool operator==(const ChildIterator &a, const ChildIteratorSentinel &) noexcept
         {
             return a.atEnd;
         }
 
-        friend bool operator!=(const ChildIterator &a, const ChildIteratorSentinel &b) noexcept
+#if !TS_HAS_CXX20
+        [[nodiscard]] friend bool operator!=(const ChildIterator &a, const ChildIteratorSentinel &b) noexcept
         {
             return !(a == b);
         }
+#endif
 
-        friend bool operator==(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
+        [[nodiscard]] friend bool operator==(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
         {
             return a == b;
         }
 
-        friend bool operator!=(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
+#if !TS_HAS_CXX20
+        [[nodiscard]] friend bool operator!=(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
         {
             return a != b;
         }
+#endif
+
+        ////////////////////////////////////////////////////////////////
+        // Operators
+        ////////////////////////////////////////////////////////////////
+
+        ChildIterator &operator=(const ChildIterator &)     = delete;
+        ChildIterator &operator=(ChildIterator &&) noexcept = default;
 
     private:
         ts::TreeCursor cursor;
-        bool           atEnd;
+        bool           atEnd = false;
     };
 
+#if TS_HAS_CXX20
+    struct Children : public std::ranges::view_interface<Children>
+#else
     struct Children
+#endif
     {
         using iterator = ChildIterator;
         using sentinel = ChildIteratorSentinel;
 
+        explicit Children(const ts::Node &n) noexcept : node_ref(n)
+        {}
+
         auto begin() const noexcept -> iterator
         {
-            return ChildIterator{ node };
+            return ChildIterator{ node_ref };
         }
 
         auto end() const noexcept -> sentinel
@@ -3279,7 +3596,12 @@ namespace ts
             return {};
         }
 
-        const ts::Node &node;
+        [[nodiscard]] size_t size() const noexcept
+        {
+            return static_cast<size_t>(node_ref.getChildCount());
+        }
+
+        ts::Node node_ref;
     };
 
 #if TS_HAS_CXX20
@@ -3292,13 +3614,15 @@ namespace ts
     // High-level utility for depth-first traversal of a syntax tree.
     /////////////////////////////////////////////////////////////////////////////
 
+    ////////////////////////////////////////////////////////////////
+    // Concepts
+    ////////////////////////////////////////////////////////////////
+
 #if TS_HAS_CXX20
     template <typename T>
     concept VisitorConcept = requires {
         { std::declval<T>()(std::declval<Node>()) } -> std::convertible_to<bool>;
     };
-
-    template <VisitorConcept F>
 #elif TS_HAS_CXX17
     template <typename T, typename = void>
     struct VisitorConcept : std::false_type
@@ -3310,7 +3634,15 @@ namespace ts
                                   std::is_convertible_v<decltype(std::declval<T>()(std::declval<Node>())), bool>>>>
         : std::true_type
     {};
+#endif
 
+    ////////////////////////////////////////////////////////////////
+    // Function
+    ////////////////////////////////////////////////////////////////
+
+#if TS_HAS_CXX20
+    template <VisitorConcept F>
+#elif TS_HAS_CXX17
     template <typename F, std::enable_if_t<VisitorConcept<F>::value, bool> = true>
 #else
 template <typename F>

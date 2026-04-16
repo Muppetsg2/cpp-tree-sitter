@@ -14,6 +14,9 @@
 #include <string>
 #include <vector>
 
+#if TS_TEST_HAS_CXX23
+#include <expected>
+#endif
 extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("Query API", "[query]")
@@ -270,7 +273,7 @@ TEST_CASE("QueryCursor Progress Callback", "[query][cursor]")
 
     SECTION("Execution with progress")
     {
-#if TEST_HAS_CXX17
+#if TS_TEST_HAS_CXX17
         cursor.exec(query, tree.getRootNode(), options);
 #else
         cursor.exec(query, tree.getRootNode(), &options);
@@ -416,3 +419,52 @@ TEST_CASE("QueryCursor Advanced Ranges", "[query][cursor][range]")
         CHECK(cursor.setContainingPointRange(pt_range));
     }
 }
+
+#if TS_TEST_HAS_CXX23
+TEST_CASE("Query C++23 Factory", "[query][cxx23]")
+{
+    ts::Language lang         = tree_sitter_json();
+    std::string  valid_source = "((number) @num)";
+
+    using Catch::Matchers::ContainsSubstring;
+
+    SECTION("Static factory create() success")
+    {
+        auto result = ts::Query::create(lang, valid_source);
+        REQUIRE(result.has_value());
+
+        ts::Query query = std::move(result.value());
+        CHECK(query.getCaptureCount() == 1);
+        CHECK(query.getCaptureNameForID(0).compare("num") == 0);
+    }
+
+    SECTION("Static factory create() invalid syntax error")
+    {
+        // Missing closing parenthesis
+        std::string invalid_source = "((number) @num";
+        auto        result         = ts::Query::create(lang, invalid_source);
+
+        REQUIRE_FALSE(result.has_value());
+        // Verify that error message contains information about the problem
+        CHECK_THAT(result.error(), ContainsSubstring("Syntax"));
+    }
+
+    SECTION("Static factory create() invalid node type")
+    {
+        std::string invalid_source = "((non_existent_node) @tag)";
+        auto        result         = ts::Query::create(lang, invalid_source);
+
+        REQUIRE_FALSE(result.has_value());
+        CHECK_THAT(result.error(), ContainsSubstring("Node"));
+    }
+
+    SECTION("Static factory create() with invalid language")
+    {
+        ts::Language invalid_lang(nullptr);
+        auto         result = ts::Query::create(invalid_lang, valid_source);
+
+        REQUIRE_FALSE(result.has_value());
+        CHECK_THAT(result.error(), ContainsSubstring("Language"));
+    }
+}
+#endif

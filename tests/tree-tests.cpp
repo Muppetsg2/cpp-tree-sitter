@@ -43,7 +43,7 @@ TEST_CASE("Tree Incremental Parsing (Editing)", "[parser][tree]")
         };
 
         tree.edit(edit);
-#if TEST_HAS_CXX17
+#if TS_TEST_HAS_CXX17
         ts::Tree new_tree = parser.parseString(new_code, tree);
 #else
         ts::Tree new_tree = parser.parseString(new_code, &tree);
@@ -148,7 +148,7 @@ TEST_CASE("Tree Ranges and Changes", "[tree]")
         };
 
         tree2.edit(edit);
-#if TEST_HAS_CXX17
+#if TS_TEST_HAS_CXX17
         ts::Tree tree3 = parser.parseString(code2, tree2);
 #else
         ts::Tree tree3 = parser.parseString(code2, &tree2);

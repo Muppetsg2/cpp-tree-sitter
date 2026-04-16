@@ -47,7 +47,7 @@ TEST_CASE("Null Node Handling", "[node]")
         CHECK(null_node.getParent().getParent().isNull());
         CHECK(null_node.getNextNamedSibling().isNamed() == false);
         CHECK(null_node.getChildCount() == 0);
-        CHECK_THROWS_AS(null_node.getChild(0), std::out_of_range);
+        CHECK(null_node.getChild(0).isNull());
     }
 
     SECTION("Source text on null")
@@ -173,6 +173,7 @@ TEST_CASE("Node flags and states", "[node]")
                           SUCCEED("Found missing node");
                           return true;
                       }
+                      return false;
                   });
     }
 }
@@ -350,14 +351,14 @@ TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
     ts::Node     root  = tree.getRootNode();
     ts::Node     array = root.getNamedChild(0);
 
-    SECTION("Out of bounds child access throws out_of_range")
+    SECTION("Out of bounds child access returns null node")
     {
         uint32_t total_children       = array.getChildCount();
         uint32_t total_named_children = array.getNamedChildCount();
 
-        // Accessing exactly at the count index should throw
-        CHECK_THROWS_AS(array.getChild(total_children), std::out_of_range);
-        CHECK_THROWS_AS(array.getNamedChild(total_named_children), std::out_of_range);
+        // Accessing exactly at the count index should return null node
+        CHECK(array.getChild(total_children).isNull());
+        CHECK(array.getNamedChild(total_named_children).isNull());
     }
 
     SECTION("Source text bounds check")
