@@ -24,17 +24,26 @@
 #include <vector>
 
 #if defined(_MSVC_LANG)
-#define TEST_CXX_LEVEL _MSVC_LANG
+#define TS_TEST_CXX_LEVEL _MSVC_LANG
 #else
-#define TEST_CXX_LEVEL __cplusplus
+#define TS_TEST_CXX_LEVEL __cplusplus
 #endif
 
-#define TEST_HAS_CXX17 (TEST_CXX_LEVEL >= 201703L)
-#define TEST_HAS_CXX20 (TEST_CXX_LEVEL >= 202002L)
+#define TS_TEST_HAS_CXX17 (TS_TEST_CXX_LEVEL >= 201703L)
+#define TS_TEST_HAS_CXX20 (TS_TEST_CXX_LEVEL >= 202002L)
+#define TS_TEST_HAS_CXX23 (TS_TEST_CXX_LEVEL >= 202302L)
+
+#if TS_TEST_HAS_CXX20
+#include <span>
+#endif
+
+#if TS_TEST_HAS_CXX23
+#include <expected>
+#endif
 
 #if defined(CPP_TS_TEST_FEATURE_WASM)
 // wasmtime
-#if TEST_HAS_CXX17
+#if TS_TEST_HAS_CXX17
 #include <wasmtime.hh>
 #else
 #include <wasm.h>

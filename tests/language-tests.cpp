@@ -104,7 +104,7 @@ TEST_CASE("Language Deep Dive", "[language]")
 
     SECTION("Metadata")
     {
-#if TEST_HAS_CXX17
+#if TS_TEST_HAS_CXX17
         auto meta = lang.getMetadata();
         if (meta)
         {
