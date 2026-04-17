@@ -3586,12 +3586,12 @@ namespace ts
         explicit Children(const ts::Node &n) noexcept : node_ref(n)
         {}
 
-        auto begin() const noexcept -> iterator
+        iterator begin() const noexcept
         {
             return ChildIterator{ node_ref };
         }
 
-        auto end() const noexcept -> sentinel
+        sentinel end() const noexcept
         {
             return {};
         }
