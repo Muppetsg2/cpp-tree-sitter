@@ -23,7 +23,7 @@ TEST_CASE("Visitor Simply Usage", "[visitor]")
     {
         int total_nodes = 0;
         ts::visit(tree.getRootNode(),
-                  [&](ts::Node n) -> bool
+                  [&](ts::Node n [[maybe_unused]]) -> bool
                   {
                       ++total_nodes;
                       return false;

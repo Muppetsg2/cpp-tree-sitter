@@ -32,6 +32,14 @@ if(NOT CPP_TS_WASMTIME_PATH)
 	set(CPP_TS_WASMTIME_PATH "" CACHE PATH "Path to locally installed wasmtime")
 endif()
 
+message(STATUS "========== cpp-tree-sitter configuration ==========")
+print_config_option(CPP_TS_BUILD_TESTS)
+print_config_option(CPP_TS_FEATURE_WASM)
+print_config_option(CPP_TS_AMALGAMATED)
+print_config_option(CPP_TS_MSVC_STATIC_RUNTIME)
+print_config_option(CPP_TS_WASMTIME_PATH)
+message(STATUS "===================================================")
+
 # We want to automatically download and provide tree-sitter to users of
 # the package, so pull it in and retrofit cmake dependencies on top of it.
 CPMAddPackage(
@@ -54,11 +62,14 @@ if (tree-sitter_ADDED)
     target_include_directories(tree-sitter PUBLIC  $<INSTALL_INTERFACE:include> $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/include>)
     target_compile_options(tree-sitter PRIVATE ${CPP_TS_COMPILE_OPTIONS})
 
-	if(MSVC)
-		target_compile_definitions(tree-sitter PRIVATE NOMINMAX)
+	if(WIN32)
 		set_target_properties(tree-sitter PROPERTIES 
 			MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 		)
+	endif()
+	
+	if(MSVC)
+		target_compile_definitions(tree-sitter PRIVATE NOMINMAX)
 	endif()
 endif()
 
@@ -67,11 +78,14 @@ target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_C
 target_link_libraries(${PROJECT_NAME} INTERFACE tree-sitter)
 target_compile_options(${PROJECT_NAME} INTERFACE ${CPP_TS_COMPILE_OPTIONS})
 
-if(MSVC)
-	target_compile_definitions(${PROJECT_NAME} INTERFACE NOMINMAX)
+if(WIN32)
 	set_target_properties(${PROJECT_NAME} PROPERTIES 
 		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 	)
+endif()
+
+if(MSVC)
+	target_compile_definitions(${PROJECT_NAME} INTERFACE NOMINMAX)
 endif()
 
 if(CPP_TS_FEATURE_WASM)

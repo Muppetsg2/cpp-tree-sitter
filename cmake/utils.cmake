@@ -11,6 +11,10 @@ set(CPP_TS_COMPILE_OPTIONS
 	>
 )
 
+function(print_config_option NAME)
+	message(STATUS "${NAME} = ${${NAME}}")
+endfunction()
+
 function(find_and_copy_lib)
 	set(options POST_BUILD)
 	set(oneValueArgs TARGET)
