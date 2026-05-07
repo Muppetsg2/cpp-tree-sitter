@@ -33,7 +33,7 @@ include(cmake/CPM.cmake)
 CPMAddPackage(
     NAME cpp-tree-sitter
     GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter.git
-    VERSION 0.26.8
+    VERSION 0.26.8-r1
 )
 
 # Download a grammar (e.g., JSON) and make it a CMake target
