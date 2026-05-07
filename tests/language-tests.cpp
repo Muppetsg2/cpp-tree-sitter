@@ -96,7 +96,7 @@ TEST_CASE("Language Deep Dive", "[language]")
         ts::StateID initial_state = 0;
         ts::Symbol  document_sym  = lang.getSymbolForName("document", true);
 
-        ts::StateID next_state = lang.getNextState(initial_state, document_sym);
+        [[maybe_unused]] ts::StateID next_state = lang.getNextState(initial_state, document_sym);
 
         ts::LookaheadIterator li = lang.getLookaheadIterator(initial_state);
         CHECK(li.getLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());

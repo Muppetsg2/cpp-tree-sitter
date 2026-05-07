@@ -198,6 +198,7 @@ TEST_CASE("QueryCursor Limits and Ranges", "[query][cursor]")
             ++count;
         }
 
+        CHECK(count == 6);
         CHECK(cursor.didExceedMatchLimit() == true);
     }
 

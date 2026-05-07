@@ -60,7 +60,7 @@ TEST_CASE("Parser Logging", "[parser][debug]")
 
     std::vector<std::string> log_messages;
 
-    parser.setLogger([&](ts::LogType type, const char *message) { log_messages.push_back(message); });
+    parser.setLogger([&](ts::LogType type [[maybe_unused]], const char *message) { log_messages.push_back(message); });
 
     ts::Tree tree = parser.parseString("[1]");
 
@@ -80,7 +80,7 @@ TEST_CASE("Parser Progress Callback", "[parser]")
 
     int              calls = 0;
     ts::ParseOptions options;
-    options.progress_callback = [&](ts::ParseState *state)
+    options.progress_callback = [&](ts::ParseState *state [[maybe_unused]])
     {
         ++calls;
         return false;
@@ -105,7 +105,7 @@ TEST_CASE("Parser Progress Callback", "[parser]")
 
     ts::Input input;
     input.encoding = ts::InputEncoding::UTF8;
-    input.read     = [&](uint32_t byte, ts::Point p, uint32_t *read)
+    input.read     = [&](uint32_t byte, ts::Point p [[maybe_unused]], uint32_t *read)
     {
         *read = (byte < code.size()) ? 1 : 0;
         return ts::details::make_view(code.c_str() + byte, *read);

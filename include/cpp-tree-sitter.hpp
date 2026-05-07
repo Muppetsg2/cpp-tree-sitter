@@ -457,7 +457,7 @@ namespace ts
         struct FreeHelper
         {
             template <typename T>
-            void operator()(T *raw_pointer) const
+            inline void operator()(T *raw_pointer) const
             {
                 if (raw_pointer == nullptr)
                 {
@@ -466,29 +466,29 @@ namespace ts
 
                 std::free(raw_pointer);
             }
-
-            template <>
-            void operator()<TSQueryCursor>(TSQueryCursor *raw_pointer) const
-            {
-                if (raw_pointer == nullptr)
-                {
-                    return;
-                }
-
-                ts_query_cursor_delete(raw_pointer);
-            }
-
-            template <>
-            void operator()<TSLookaheadIterator>(TSLookaheadIterator *raw_pointer) const
-            {
-                if (raw_pointer == nullptr)
-                {
-                    return;
-                }
-
-                ts_lookahead_iterator_delete(raw_pointer);
-            }
         };
+
+        template <>
+        inline void FreeHelper::operator()<TSQueryCursor>(TSQueryCursor *raw_pointer) const
+        {
+            if (raw_pointer == nullptr)
+            {
+                return;
+            }
+
+            ts_query_cursor_delete(raw_pointer);
+        }
+
+        template <>
+        inline void FreeHelper::operator()<TSLookaheadIterator>(TSLookaheadIterator *raw_pointer) const
+        {
+            if (raw_pointer == nullptr)
+            {
+                return;
+            }
+
+            ts_lookahead_iterator_delete(raw_pointer);
+        }
     } // namespace details
 
 #if TS_HAS_CXX17

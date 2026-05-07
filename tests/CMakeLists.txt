@@ -71,10 +71,13 @@ if(Catch2_ADDED)
         POST_BUILD
     )
 	
-	if(MSVC)
+	if(WIN32)
 		set_target_properties(Catch2WithMain Catch2 PROPERTIES 
 			MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 		)
+	endif()
+	
+	if(MSVC)
 		target_compile_definitions(Catch2 PRIVATE NOMINMAX)
 		target_compile_definitions(Catch2WithMain PRIVATE NOMINMAX)
 	endif()
@@ -91,25 +94,30 @@ target_compile_options(${TARGET_NAME} PRIVATE
     >
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
         $<$<CONFIG:Release>:-O3>
-        $<$<CONFIG:Release>:-flto>
+        $<$<CONFIG:Release>:-flto=auto>
     >
 )
 	
 target_link_options(${TARGET_NAME} PRIVATE
     $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
         $<$<CONFIG:Release>:/LTCG>
+        $<$<CONFIG:Release>:/O2>
     >
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-        $<$<CONFIG:Release>:-flto>
+        $<$<CONFIG:Release>:-flto=auto>
+        $<$<CONFIG:Release>:-O3>
         $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-fuse-ld=lld>
         -static
     >
 )
 
-if(MSVC)
+if(WIN32)
 	set_target_properties(${TARGET_NAME} PROPERTIES 
 		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
 	)
+endif()
+
+if(MSVC)
     target_compile_definitions(${TARGET_NAME} PRIVATE NOMINMAX)
 endif()
 
