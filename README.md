@@ -33,7 +33,7 @@ include(cmake/CPM.cmake)
 CPMAddPackage(
     NAME cpp-tree-sitter
     GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter.git
-    VERSION 0.26.8-r1
+    VERSION 0.26.9
 )
 
 # Download a grammar (e.g., JSON) and make it a CMake target
@@ -62,9 +62,11 @@ You can set these options using `-DOPTION=VALUE` during the CMake configuration 
 |     `CPP_TS_AMALGAMATED`      |        ON         | Build `tree-sitter` core using the amalgamated `lib.c` for faster compilation. |
 | `CPP_TS_MSVC_STATIC_RUNTIME`  |        OFF        |                    Link static MSVC runtime (/MT or /MTd).                     |
 
-### Path Variables
+### Path and Version Variables
 
-These variables control where the library looks for external dependencies or grammars.
+These variables control dependency versions and where the library looks for external tools or grammars.
+
+* `CPP_TS_WASMTIME_VERSION`: Defines the version of `wasmtime` to fetch if WASM support is enabled. **Note:** The current officially supported version of wasmtime-c-api by tree-sitter is v36.0.9. However a newer versions generally work. You can override this to e.g. 45.0.0 or any other version if you require strict compatibility.
 
 * `CPP_TS_WASMTIME_PATH`: Path to a local `wasmtime` installation. If not set and WASM is enabled, CMake will automatically download the appropriate binary for your system.
 

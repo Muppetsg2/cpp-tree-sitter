@@ -20,7 +20,21 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     LINKER_LANGUAGE CXX
     CXX_STANDARD_REQUIRED ON
     CXX_STANDARD ${CPP_TS_TEST_CXX_STANDARD}
+	POSITION_INDEPENDENT_CODE ON
 )
+
+# Check PIE
+message(CHECK_START "Checking for CXX linker PIE support")
+
+include(CheckPIESupported)
+check_pie_supported(OUTPUT_VARIABLE pie_output LANGUAGES CXX)
+
+if(CMAKE_CXX_LINK_PIE_SUPPORTED)
+	message(CHECK_PASS "Supported")
+else()
+	message(CHECK_FAIL "NOT Supported")
+	message(VERBOSE "PIE is not supported at link time:\n${pie_output} PIE link options will not be passed to linker.")
+endif()
 
 target_include_directories(${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -38,7 +52,7 @@ endif()
 set(JSONGrammarArgs
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git
-    VERSION 0.24.8
+    VERSION ${CPP_TS_JSON_GRAMMAR}
 )
 
 if(CPP_TS_FEATURE_WASM)
@@ -49,7 +63,7 @@ endif()
 CPPTSAddGrammar(${JSONGrammarArgs})
 
 CPMAddPackage(
-    URI "gh:catchorg/Catch2@3.14.0"
+    URI "gh:catchorg/Catch2@${CPP_TS_CATCH2_VERSION}"
 	OPTIONS "CATCH_INSTALL_DOCS OFF"
 			"BUILD_TESTING OFF"
 )
@@ -57,14 +71,14 @@ CPMAddPackage(
 if(Catch2_ADDED)
     set(Catch2_Extras ${Catch2_SOURCE_DIR}/extras CACHE INTERNAL "")
 
-    find_and_copy_lib(
+    cpp_ts_find_and_copy_lib(
         TARGET ${TARGET_NAME}
         NAMES "$<$<CONFIG:Debug>:Catch2d.dll>$<$<NOT:$<CONFIG:Debug>>:Catch2.dll>"
         PATHS ${Catch2_BINARY_DIR}/src
         POST_BUILD
     )
 
-    find_and_copy_lib(
+    cpp_ts_find_and_copy_lib(
         TARGET ${TARGET_NAME}
         NAMES "$<$<CONFIG:Debug>:Catch2Maind.dll>$<$<NOT:$<CONFIG:Debug>>:Catch2Main.dll>"
         PATHS ${Catch2_BINARY_DIR}/src
@@ -85,31 +99,55 @@ endif()
 
 target_compile_options(${TARGET_NAME} PRIVATE
     $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
-        $<$<CONFIG:Release>:/O2>
-        $<$<CONFIG:Release>:/GL>
-        $<$<CONFIG:Release>:/fp:fast>
         $<$<CONFIG:Debug>:/RTC1>
         /Zc:preprocessor
         /Zc:__cplusplus
+        /W4
     >
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-        $<$<CONFIG:Release>:-O3>
-        $<$<CONFIG:Release>:-flto=auto>
+        -Wno-unused-but-set-variable
+		-Wno-conversion
+		-Wall
+		-Wextra
     >
 )
+
+# Check IPO
+message(CHECK_START "Checking for linker IPO support")
+
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT ipo_output)
+
+if(ipo_supported)
+	message(CHECK_PASS "Supported")
+	set_target_properties(${TARGET_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+else()
+	message(CHECK_FAIL "NOT Supported")
+	message(VERBOSE "IPO is not supported at link time:\n${ipo_output} IPO link options will not be passed to linker.")
+    target_compile_options(${TARGET_NAME} PRIVATE
+        $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+            $<$<CONFIG:Release>:/O2>
+            $<$<CONFIG:Release>:/GL>
+            $<$<CONFIG:Release>:/fp:fast>
+        >
+        $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+            $<$<CONFIG:Release>:-O3>
+            $<$<CONFIG:Release>:-flto=auto>
+        >
+    )
 	
-target_link_options(${TARGET_NAME} PRIVATE
-    $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
-        $<$<CONFIG:Release>:/LTCG>
-        $<$<CONFIG:Release>:/O2>
-    >
-    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-        $<$<CONFIG:Release>:-flto=auto>
-        $<$<CONFIG:Release>:-O3>
-        $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-fuse-ld=lld>
-        -static
-    >
-)
+    target_link_options(${TARGET_NAME} PRIVATE
+        $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+            $<$<CONFIG:Release>:/LTCG>
+            $<$<CONFIG:Release>:/O2>
+        >
+        $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+            $<$<CONFIG:Release>:-flto=auto>
+            $<$<CONFIG:Release>:-O3>
+            $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-fuse-ld=lld>
+        >
+    )
+endif()
 
 if(WIN32)
 	set_target_properties(${TARGET_NAME} PROPERTIES 

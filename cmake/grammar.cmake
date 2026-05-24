@@ -75,7 +75,7 @@ function(CPPTSAddGrammar)
         message(STATUS "Tree-sitter: Using ${NAME} from explicitly provided path: ${GRAMMAR_SOURCE_DIR}")
 	elseif(CPP_TS_GRAMMAR_PATH AND NOT arg_NOT_IN_GLOBAL_DIR)
         if(NOT arg_NAME)
-			message(FATAL_ERROR "cpp_ts_add_grammar requires NAME for GRAMMAR_SOURCE_DIR")
+			message(FATAL_ERROR "CPPTSAddGrammar requires NAME for GRAMMAR_SOURCE_DIR")
 		endif()
 
 		set(NAME ${arg_NAME})
@@ -95,7 +95,7 @@ function(CPPTSAddGrammar)
 
 	if(NOT GRAMMAR_SOURCE_DIR)		
 		if(NOT arg_GIT_REPOSITORY)
-            message(FATAL_ERROR "cpp_ts_add_grammar requires GIT_REPOSITORY OR SOURCE_DIR to fetch grammar")
+            message(FATAL_ERROR "CPPTSAddGrammar requires GIT_REPOSITORY OR SOURCE_DIR to fetch grammar")
         endif()
 
         message(STATUS "Tree-sitter: Grammar not found locally, fetching from ${arg_GIT_REPOSITORY}")

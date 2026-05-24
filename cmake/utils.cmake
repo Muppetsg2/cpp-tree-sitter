@@ -1,13 +1,30 @@
-set(CPP_TS_COMPILE_OPTIONS
+set(CPP_TS_NECESSARY_COMPILE_OPTIONS
 	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
-		/W4
 		/Zc:__cplusplus
 	>
+)
+
+set(TS_NO_IPO_COMPILE_OPTIONS
+	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+		$<$<CONFIG:Release>:/O2>
+		$<$<CONFIG:Release>:/GL>
+        $<$<CONFIG:Release>:/fp:fast>
+        $<$<CONFIG:Debug>:/RTC1>
+        /Zc:preprocessor
+	>
 	$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-		-Wno-unused-but-set-variable
-		-Wno-conversion
-		-Wall
-		-Wextra
+		$<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:Release>:-flto>
+	>
+)
+
+set(TS_NO_IPO_LINK_OPTIONS
+	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+		$<$<CONFIG:Release>:/LTCG>
+	>
+	$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+		$<$<CONFIG:Release>:-flto>
+		$<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-fuse-ld=lld>
 	>
 )
 
@@ -15,7 +32,7 @@ function(print_config_option NAME)
 	message(STATUS "${NAME} = ${${NAME}}")
 endfunction()
 
-function(find_and_copy_lib)
+function(cpp_ts_find_and_copy_lib)
 	set(options POST_BUILD)
 	set(oneValueArgs TARGET)
 	set(multiValueArgs NAMES PATHS)
@@ -25,15 +42,15 @@ function(find_and_copy_lib)
 	)
 
 	if(NOT arg_TARGET)
-		message(FATAL_ERROR "find_and_copy_lib requires TARGET")
+		message(FATAL_ERROR "cpp_ts_find_and_copy_lib requires TARGET")
 	endif()
 
 	if(NOT arg_NAMES)
-		message(FATAL_ERROR "find_and_copy_lib requires NAMES")
+		message(FATAL_ERROR "cpp_ts_find_and_copy_lib requires NAMES")
 	endif()
 
 	if(NOT arg_PATHS)
-		message(FATAL_ERROR "find_and_copy_lib requires PATHS")
+		message(FATAL_ERROR "cpp_ts_find_and_copy_lib requires PATHS")
 	endif()
 
 	if(arg_NAMES)
