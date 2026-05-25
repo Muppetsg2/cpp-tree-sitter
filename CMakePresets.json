@@ -18,10 +18,11 @@
         "CMAKE_CXX_EXTENSIONS": false,
         "CMAKE_C_EXTENSIONS": false,
         "BUILD_SHARED_LIBS": false,
-        "CMAKE_DISABLE_SOURCE_CHANGES": true
+        "CMAKE_DISABLE_SOURCE_CHANGES": true,
+        "CPP_TS_BUILD_TESTS": true
       }
     },
-	  {
+    {
       "name": "Release",
       "hidden": true,
       "cacheVariables": {
@@ -51,6 +52,21 @@
         "strategy": "external"
       }
     },
+    {
+      "name": "Wasm-ON",
+      "hidden": true,
+      "cacheVariables": {
+        "CPP_TS_FEATURE_WASM": true
+      }
+    },
+    {
+      "name": "Wasm-OFF",
+      "hidden": true,
+      "cacheVariables": {
+        "CPP_TS_FEATURE_WASM": false
+      }
+    },
+
     {
       "name": "Linux-Base",
       "hidden": true,
@@ -93,40 +109,77 @@
         "rhs": "Windows"
       }
     },
+
     {
       "name": "x64-Debug-Linux",
       "displayName": "x64 Debug (Linux)",
       "inherits": [
-		    "Linux-Base",
-		    "Debug",
-		    "x86_64"
+        "Linux-Base",
+        "Debug",
+        "x86_64",
+        "Wasm-OFF"
       ]
     },
     {
       "name": "x64-Debug-MacOS",
       "displayName": "x64 Debug (MacOS)",
-	    "inherits": [
-		    "MacOS-Base",
-		    "Debug",
-		    "x86_64"
+      "inherits": [
+        "MacOS-Base",
+        "Debug",
+        "x86_64",
+        "Wasm-OFF"
       ]
     },
     {
       "name": "x64-Debug-Windows",
       "displayName": "x64 Debug (Windows)",
-	    "inherits": [
-		    "Windows-Base",
-		    "Debug",
-		    "x86_64"
+      "inherits": [
+        "Windows-Base",
+        "Debug",
+        "x86_64",
+        "Wasm-OFF"
       ]
     },
+
+    {
+      "name": "x64-Debug-Linux-Wasm",
+      "displayName": "x64 Debug (Linux) [WASM]",
+      "inherits": [
+        "Linux-Base",
+        "Debug",
+        "x86_64",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x64-Debug-MacOS-Wasm",
+      "displayName": "x64 Debug (MacOS) [WASM]",
+      "inherits": [
+        "MacOS-Base",
+        "Debug",
+        "x86_64",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x64-Debug-Windows-Wasm",
+      "displayName": "x64 Debug (Windows) [WASM]",
+      "inherits": [
+        "Windows-Base",
+        "Debug",
+        "x86_64",
+        "Wasm-ON"
+      ]
+    },
+
     {
       "name": "x64-Release-Linux",
       "displayName": "x64 Release (Linux)",
       "inherits": [
         "Linux-Base",
         "Release",
-        "x86_64"
+        "x86_64",
+        "Wasm-OFF"
       ]
     },
     {
@@ -135,7 +188,8 @@
       "inherits": [
         "MacOS-Base",
         "Release",
-        "x86_64"
+        "x86_64",
+        "Wasm-OFF"
       ]
     },
     {
@@ -144,16 +198,50 @@
       "inherits": [
         "Windows-Base",
         "Release",
-        "x86_64"
+        "x86_64",
+        "Wasm-OFF"
       ]
     },
+
+    {
+      "name": "x64-Release-Linux-Wasm",
+      "displayName": "x64 Release (Linux) [WASM]",
+      "inherits": [
+        "Linux-Base",
+        "Release",
+        "x86_64",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x64-Release-MacOS-Wasm",
+      "displayName": "x64 Release (MacOS) [WASM]",
+      "inherits": [
+        "MacOS-Base",
+        "Release",
+        "x86_64",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x64-Release-Windows-Wasm",
+      "displayName": "x64 Release (Windows) [WASM]",
+      "inherits": [
+        "Windows-Base",
+        "Release",
+        "x86_64",
+        "Wasm-ON"
+      ]
+    },
+
     {
       "name": "x86-Debug-Linux",
       "displayName": "x86 Debug (Linux)",
       "inherits": [
         "Linux-Base",
         "Debug",
-        "x86"
+        "x86",
+        "Wasm-OFF"
       ]
     },
     {
@@ -162,7 +250,8 @@
       "inherits": [
         "MacOS-Base",
         "Debug",
-        "x86"
+        "x86",
+        "Wasm-OFF"
       ]
     },
     {
@@ -171,16 +260,50 @@
       "inherits": [
         "Windows-Base",
         "Debug",
-        "x86"
+        "x86",
+        "Wasm-OFF"
       ]
     },
+
+    {
+      "name": "x86-Debug-Linux-Wasm",
+      "displayName": "x86 Debug (Linux) [WASM]",
+      "inherits": [
+        "Linux-Base",
+        "Debug",
+        "x86",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x86-Debug-MacOS-Wasm",
+      "displayName": "x86 Debug (MacOS) [WASM]",
+      "inherits": [
+        "MacOS-Base",
+        "Debug",
+        "x86",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x86-Debug-Windows-Wasm",
+      "displayName": "x86 Debug (Windows) [WASM]",
+      "inherits": [
+        "Windows-Base",
+        "Debug",
+        "x86",
+        "Wasm-ON"
+      ]
+    },
+
     {
       "name": "x86-Release-Linux",
       "displayName": "x86 Release (Linux)",
       "inherits": [
         "Linux-Base",
         "Release",
-        "x86"
+        "x86",
+        "Wasm-OFF"
       ]
     },
     {
@@ -189,7 +312,8 @@
       "inherits": [
         "MacOS-Base",
         "Release",
-        "x86"
+        "x86",
+        "Wasm-OFF"
       ]
     },
     {
@@ -198,8 +322,323 @@
       "inherits": [
         "Windows-Base",
         "Release",
-        "x86"
+        "x86",
+        "Wasm-OFF"
       ]
+    },
+
+    {
+      "name": "x86-Release-Linux-Wasm",
+      "displayName": "x86 Release (Linux) [WASM]",
+      "inherits": [
+        "Linux-Base",
+        "Release",
+        "x86",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x86-Release-MacOS-Wasm",
+      "displayName": "x86 Release (MacOS) [WASM]",
+      "inherits": [
+        "MacOS-Base",
+        "Release",
+        "x86",
+        "Wasm-ON"
+      ]
+    },
+    {
+      "name": "x86-Release-Windows-Wasm",
+      "displayName": "x86 Release (Windows) [WASM]",
+      "inherits": [
+        "Windows-Base",
+        "Release",
+        "x86",
+        "Wasm-ON"
+      ]
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-Debug-Linux",
+      "displayName": "x64 Debug (Linux)",
+      "configurePreset": "x64-Debug-Linux"
+    },
+    {
+      "name": "x64-Debug-Linux-Wasm",
+      "displayName": "x64 Debug (Linux) [WASM]",
+      "configurePreset": "x64-Debug-Linux-Wasm"
+    },
+    {
+      "name": "x64-Release-Linux",
+      "displayName": "x64 Release (Linux)",
+      "configurePreset": "x64-Release-Linux"
+    },
+    {
+      "name": "x64-Release-Linux-Wasm",
+      "displayName": "x64 Release (Linux) [WASM]",
+      "configurePreset": "x64-Release-Linux-Wasm"
+    },
+    {
+      "name": "x86-Debug-Linux",
+      "displayName": "x86 Debug (Linux)",
+      "configurePreset": "x86-Debug-Linux"
+    },
+    {
+      "name": "x86-Debug-Linux-Wasm",
+      "displayName": "x86 Debug (Linux) [WASM]",
+      "configurePreset": "x86-Debug-Linux-Wasm"
+    },
+    {
+      "name": "x86-Release-Linux",
+      "displayName": "x86 Release (Linux)",
+      "configurePreset": "x86-Release-Linux"
+    },
+    {
+      "name": "x86-Release-Linux-Wasm",
+      "displayName": "x86 Release (Linux) [WASM]",
+      "configurePreset": "x86-Release-Linux-Wasm"
+    },
+
+    {
+      "name": "x64-Debug-MacOS",
+      "displayName": "x64 Debug (MacOS)",
+      "configurePreset": "x64-Debug-MacOS"
+    },
+    {
+      "name": "x64-Debug-MacOS-Wasm",
+      "displayName": "x64 Debug (MacOS) [WASM]",
+      "configurePreset": "x64-Debug-MacOS-Wasm"
+    },
+    {
+      "name": "x64-Release-MacOS",
+      "displayName": "x64 Release (MacOS)",
+      "configurePreset": "x64-Release-MacOS"
+    },
+    {
+      "name": "x64-Release-MacOS-Wasm",
+      "displayName": "x64 Release (MacOS) [WASM]",
+      "configurePreset": "x64-Release-MacOS-Wasm"
+    },
+    {
+      "name": "x86-Debug-MacOS",
+      "displayName": "x86 Debug (MacOS)",
+      "configurePreset": "x86-Debug-MacOS"
+    },
+    {
+      "name": "x86-Debug-MacOS-Wasm",
+      "displayName": "x86 Debug (MacOS) [WASM]",
+      "configurePreset": "x86-Debug-MacOS-Wasm"
+    },
+    {
+      "name": "x86-Release-MacOS",
+      "displayName": "x86 Release (MacOS)",
+      "configurePreset": "x86-Release-MacOS"
+    },
+    {
+      "name": "x86-Release-MacOS-Wasm",
+      "displayName": "x86 Release (MacOS) [WASM]",
+      "configurePreset": "x86-Release-MacOS-Wasm"
+    },
+
+    {
+      "name": "x64-Debug-Windows",
+      "displayName": "x64 Debug (Windows)",
+      "configurePreset": "x64-Debug-Windows"
+    },
+    {
+      "name": "x64-Debug-Windows-Wasm",
+      "displayName": "x64 Debug (Windows) [WASM]",
+      "configurePreset": "x64-Debug-Windows-Wasm"
+    },
+    {
+      "name": "x64-Release-Windows",
+      "displayName": "x64 Release (Windows)",
+      "configurePreset": "x64-Release-Windows"
+    },
+    {
+      "name": "x64-Release-Windows-Wasm",
+      "displayName": "x64 Release (Windows) [WASM]",
+      "configurePreset": "x64-Release-Windows-Wasm"
+    },
+    {
+      "name": "x86-Debug-Windows",
+      "displayName": "x86 Debug (Windows)",
+      "configurePreset": "x86-Debug-Windows"
+    },
+    {
+      "name": "x86-Debug-Windows-Wasm",
+      "displayName": "x86 Debug (Windows) [WASM]",
+      "configurePreset": "x86-Debug-Windows-Wasm"
+    },
+    {
+      "name": "x86-Release-Windows",
+      "displayName": "x86 Release (Windows)",
+      "configurePreset": "x86-Release-Windows"
+    },
+    {
+      "name": "x86-Release-Windows-Wasm",
+      "displayName": "x86 Release (Windows) [WASM]",
+      "configurePreset": "x86-Release-Windows-Wasm"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "Test-Base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "x64-Debug-Linux-Test",
+      "displayName": "x64 Debug (Linux) [TEST]",
+      "configurePreset": "x64-Debug-Linux",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Debug-Linux-Wasm-Test",
+      "displayName": "x64 Debug (Linux) [WASM][TEST]",
+      "configurePreset": "x64-Debug-Linux-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Release-Linux-Test",
+      "displayName": "x64 Release (Linux) [TEST]",
+      "configurePreset": "x64-Release-Linux",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Release-Linux-Wasm-Test",
+      "displayName": "x64 Release (Linux) [WASM][TEST]",
+      "configurePreset": "x64-Release-Linux-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Debug-Linux-Test",
+      "displayName": "x86 Debug (Linux) [TEST]",
+      "configurePreset": "x86-Debug-Linux",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Debug-Linux-Wasm-Test",
+      "displayName": "x86 Debug (Linux) [WASM][TEST]",
+      "configurePreset": "x86-Debug-Linux-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Release-Linux-Test",
+      "displayName": "x86 Release (Linux) [TEST]",
+      "configurePreset": "x86-Release-Linux",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Release-Linux-Wasm-Test",
+      "displayName": "x86 Release (Linux) [WASM][TEST]",
+      "configurePreset": "x86-Release-Linux-Wasm",
+      "inherits": "Test-Base"
+    },
+
+    {
+      "name": "x64-Debug-MacOS-Test",
+      "displayName": "x64 Debug (MacOS) [TEST]",
+      "configurePreset": "x64-Debug-MacOS",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Debug-MacOS-Wasm-Test",
+      "displayName": "x64 Debug (MacOS) [WASM][TEST]",
+      "configurePreset": "x64-Debug-MacOS-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Release-MacOS-Test",
+      "displayName": "x64 Release (MacOS) [TEST]",
+      "configurePreset": "x64-Release-MacOS",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Release-MacOS-Wasm-Test",
+      "displayName": "x64 Release (MacOS) [WASM][TEST]",
+      "configurePreset": "x64-Release-MacOS-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Debug-MacOS-Test",
+      "displayName": "x86 Debug (MacOS) [TEST]",
+      "configurePreset": "x86-Debug-MacOS",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Debug-MacOS-Wasm-Test",
+      "displayName": "x86 Debug (MacOS) [WASM][TEST]",
+      "configurePreset": "x86-Debug-MacOS-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Release-MacOS-Test",
+      "displayName": "x86 Release (MacOS) [TEST]",
+      "configurePreset": "x86-Release-MacOS",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Release-MacOS-Wasm-Test",
+      "displayName": "x86 Release (MacOS) [WASM][TEST]",
+      "configurePreset": "x86-Release-MacOS-Wasm",
+      "inherits": "Test-Base"
+    },
+
+    {
+      "name": "x64-Debug-Windows-Test",
+      "displayName": "x64 Debug (Windows) [TEST]",
+      "configurePreset": "x64-Debug-Windows",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Debug-Windows-Wasm-Test",
+      "displayName": "x64 Debug (Windows) [WASM][TEST]",
+      "configurePreset": "x64-Debug-Windows-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Release-Windows-Test",
+      "displayName": "x64 Release (Windows) [TEST]",
+      "configurePreset": "x64-Release-Windows",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x64-Release-Windows-Wasm-Test",
+      "displayName": "x64 Release (Windows) [WASM][TEST]",
+      "configurePreset": "x64-Release-Windows-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Debug-Windows-Test",
+      "displayName": "x86 Debug (Windows) [TEST]",
+      "configurePreset": "x86-Debug-Windows",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Debug-Windows-Wasm-Test",
+      "displayName": "x86 Debug (Windows) [WASM][TEST]",
+      "configurePreset": "x86-Debug-Windows-Wasm",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Release-Windows-Test",
+      "displayName": "x86 Release (Windows) [TEST]",
+      "configurePreset": "x86-Release-Windows",
+      "inherits": "Test-Base"
+    },
+    {
+      "name": "x86-Release-Windows-Wasm-Test",
+      "displayName": "x86 Release (Windows) [WASM][TEST]",
+      "configurePreset": "x86-Release-Windows-Wasm",
+      "inherits": "Test-Base"
     }
   ]
 }

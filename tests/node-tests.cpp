@@ -370,6 +370,7 @@ TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
         CHECK(array.getSourceRange(short_source).empty());
     }
 
+#if SIZE_MAX > UINT32_MAX
     SECTION("Field name size overflow throws length_error")
     {
         const char      *fake_str      = "fake";
@@ -379,6 +380,7 @@ TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
 
         CHECK_THROWS_AS(array.getChildByFieldName(huge_view), std::length_error);
     }
+#endif
 
     SECTION("Mutating a null node throws logic_error")
     {
@@ -479,6 +481,7 @@ TEST_CASE("Node Get Child By Type", "[node][search]")
         CHECK(null_node.getChildByType("pair").isNull());
     }
 
+#if SIZE_MAX > UINT32_MAX
     SECTION("Throws std::length_error when input name exceeds 4GB limit")
     {
         ts::Node                         node          = ts::Node::null();
@@ -488,6 +491,7 @@ TEST_CASE("Node Get Child By Type", "[node][search]")
 
         CHECK_THROWS_AS(node.getChildByType(huge_view), std::length_error);
     }
+#endif
 
     SECTION("Tree-based lookup using JSON grammar")
     {
@@ -540,7 +544,7 @@ TEST_CASE("Node Get Child By Symbol", "[node][search]")
     SECTION("Returns null() for an empty/null node")
     {
         ts::Node null_node = ts::Node::null();
-        // Przekazanie dowolnego symbolu (np. 1) do pustego wêz³a
+        // Passing any symbol (e.g. 1) to an empty node
         CHECK(null_node.getChildBySymbol(1).isNull());
     }
 
@@ -603,6 +607,7 @@ TEST_CASE("Node Get Named Child By Type", "[node][search]")
         CHECK(null_node.getNamedChildByType("pair").isNull());
     }
 
+#if SIZE_MAX > UINT32_MAX
     SECTION("Throws std::length_error when input name exceeds 4GB limit")
     {
         ts::Node                         node          = ts::Node::null();
@@ -612,6 +617,7 @@ TEST_CASE("Node Get Named Child By Type", "[node][search]")
 
         CHECK_THROWS_AS(node.getNamedChildByType(huge_view), std::length_error);
     }
+#endif
 
     SECTION("Tree-based strict AST lookup using JSON grammar")
     {

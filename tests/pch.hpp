@@ -24,26 +24,27 @@
 #include <vector>
 
 #if defined(_MSVC_LANG)
-#define TS_TEST_CXX_LEVEL _MSVC_LANG
+#define CPP_TS_TEST_CXX_LEVEL _MSVC_LANG
 #else
-#define TS_TEST_CXX_LEVEL __cplusplus
+#define CPP_TS_TEST_CXX_LEVEL __cplusplus
 #endif
 
-#define TS_TEST_HAS_CXX17 (TS_TEST_CXX_LEVEL >= 201703L)
-#define TS_TEST_HAS_CXX20 (TS_TEST_CXX_LEVEL >= 202002L)
-#define TS_TEST_HAS_CXX23 (TS_TEST_CXX_LEVEL >= 202302L)
+#define CPP_TS_TEST_HAS_CXX17 (CPP_TS_TEST_CXX_LEVEL >= 201703L)
+#define CPP_TS_TEST_HAS_CXX20 (CPP_TS_TEST_CXX_LEVEL >= 202002L)
+#define CPP_TS_TEST_HAS_CXX23 (CPP_TS_TEST_CXX_LEVEL >= 202302L)
 
-#if TS_TEST_HAS_CXX20
+#if CPP_TS_TEST_HAS_CXX20
 #include <span>
 #endif
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
 #include <expected>
 #endif
 
 #if defined(CPP_TS_TEST_FEATURE_WASM)
+#define CPP_TS_TEST_WASMTIME_CXX_ENABLED CPP_TS_TEST_HAS_CXX17 && (CPP_TS_TEST_WASMTIME_VERSION >= 390000)
 // wasmtime
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
 #include <wasmtime.hh>
 #else
 #include <wasm.h>

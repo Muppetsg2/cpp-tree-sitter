@@ -19,11 +19,11 @@
 #include <string>
 #include <vector>
 
-#if TS_TEST_HAS_CXX20
+#if CPP_TS_TEST_HAS_CXX20
 #include <span>
 #endif
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
 #include <expected>
 #endif
 
@@ -60,7 +60,7 @@ TEST_CASE("Parser Logging", "[parser][debug]")
 
     std::vector<std::string> log_messages;
 
-    parser.setLogger([&](ts::LogType type [[maybe_unused]], const char *message) { log_messages.push_back(message); });
+    parser.setLogger([&](ts::LogType, const char *message) { log_messages.push_back(message); });
 
     ts::Tree tree = parser.parseString("[1]");
 
@@ -80,7 +80,7 @@ TEST_CASE("Parser Progress Callback", "[parser]")
 
     int              calls = 0;
     ts::ParseOptions options;
-    options.progress_callback = [&](ts::ParseState *state [[maybe_unused]])
+    options.progress_callback = [&](ts::ParseState *)
     {
         ++calls;
         return false;
@@ -105,12 +105,12 @@ TEST_CASE("Parser Progress Callback", "[parser]")
 
     ts::Input input;
     input.encoding = ts::InputEncoding::UTF8;
-    input.read     = [&](uint32_t byte, ts::Point p [[maybe_unused]], uint32_t *read)
+    input.read     = [&](uint32_t byte, ts::Point, uint32_t *read)
     {
         *read = (byte < code.size()) ? 1 : 0;
         return ts::details::make_view(code.c_str() + byte, *read);
     };
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_HAS_CXX17
     ts::Tree tree = parser.parse(input, {}, options);
 #else
     ts::Tree tree = parser.parse(input, nullptr, &options);
@@ -144,7 +144,7 @@ TEST_CASE("Parser Configuration and Language", "[parser]")
     {
         CHECK(parser.getCurrentLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
         auto res = parser.setLanguage(lang);
         CHECK(res.has_value());
         CHECK(res.value());
@@ -182,7 +182,7 @@ TEST_CASE("Parser Encoded Strings", "[parser]")
                             { 0, 4 }, { 0, 5 }, { 0, 5 } };
         old_tree.edit(edit);
 
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_HAS_CXX17
         ts::Tree new_tree = parser.parseStringEncoded(new_code, ts::InputEncoding::UTF8, old_tree);
 #else
         ts::Tree new_tree = parser.parseStringEncoded(new_code, ts::InputEncoding::UTF8, &old_tree);
@@ -289,6 +289,7 @@ TEST_CASE("Parser Exception Handling (No Language)", "[parser][exceptions]")
     }
 }
 
+#if SIZE_MAX > UINT32_MAX
 TEST_CASE("Parser Input Limits (4GB Overflow)", "[parser][exceptions]")
 {
     ts::Language lang = tree_sitter_json();
@@ -306,6 +307,7 @@ TEST_CASE("Parser Input Limits (4GB Overflow)", "[parser][exceptions]")
         CHECK_THROWS_AS(parser.parseStringEncoded(huge_view, ts::InputEncoding::UTF8), std::length_error);
     }
 }
+#endif
 
 TEST_CASE("Parser Included Ranges Merging Algorithm", "[parser][range]")
 {
@@ -364,7 +366,7 @@ TEST_CASE("Parser Included Ranges - Reset to full document", "[parser][range]")
         // Restrict the parser to a specific narrow range (e.g., just the number '2')
         ts::Range narrow_range{ ts::Extent<ts::Point>{ { 0, 4 }, { 0, 5 } }, ts::Extent<uint32_t>{ 4, 5 } };
 
-#if TS_TEST_HAS_CXX20
+#if CPP_TS_TEST_HAS_CXX20
         REQUIRE(parser.setIncludedRanges(std::span<const ts::Range>{ &narrow_range, 1 }));
 #else
         REQUIRE(parser.setIncludedRanges({ narrow_range }));
@@ -387,7 +389,7 @@ TEST_CASE("Parser Included Ranges - Reset to full document", "[parser][range]")
     }
 }
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
 TEST_CASE("Parser C++23 Specific Features", "[parser][cxx23]")
 {
     ts::Language lang = tree_sitter_json();

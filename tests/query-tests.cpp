@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
 #include <expected>
 #endif
 extern "C" const TSLanguage *tree_sitter_json();
@@ -274,7 +274,7 @@ TEST_CASE("QueryCursor Progress Callback", "[query][cursor]")
 
     SECTION("Execution with progress")
     {
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_HAS_CXX17
         cursor.exec(query, tree.getRootNode(), options);
 #else
         cursor.exec(query, tree.getRootNode(), &options);
@@ -324,6 +324,7 @@ TEST_CASE("Query Exception Handling and Limits", "[query][exceptions]")
         CHECK_THROWS_AS(ts::Query(invalid_lang, valid_query), std::runtime_error);
     }
 
+#if SIZE_MAX > UINT32_MAX
     SECTION("Exceeding 4GB source size limit throws length_error")
     {
         // Fake a massive string view to trigger the overflow protection
@@ -345,6 +346,7 @@ TEST_CASE("Query Exception Handling and Limits", "[query][exceptions]")
 
         CHECK_THROWS_AS(query.disableCapture(huge_view), std::length_error);
     }
+#endif
 }
 
 TEST_CASE("QueryCursor Depth Limits", "[query][cursor]")
@@ -421,7 +423,7 @@ TEST_CASE("QueryCursor Advanced Ranges", "[query][cursor][range]")
     }
 }
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
 TEST_CASE("Query C++23 Factory", "[query][cxx23]")
 {
     ts::Language lang         = tree_sitter_json();

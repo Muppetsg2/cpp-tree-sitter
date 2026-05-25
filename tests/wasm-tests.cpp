@@ -6,7 +6,7 @@
 #include <cpp-tree-sitter.hpp>
 
 // wasmtime
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
 #include <wasmtime.hh>
 #else
 #include <wasm.h>
@@ -20,13 +20,13 @@
 #include <stdexcept>
 #include <string>
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
 #include <expected>
 #endif
 
 TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 {
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
     // C++ Api Wasm Engine
     wasmtime::Engine engineCpp;
     wasm_engine_t   *engine = engineCpp.capi();
@@ -55,7 +55,7 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 
         CHECK_FALSE(store.isValid());
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
         auto res = parser.setLanguage(json_lang);
         CHECK(res.has_value());
         CHECK(res.value());
@@ -89,7 +89,7 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 
 TEST_CASE("WasmStore Lifecycle", "[wasm]")
 {
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
     // C++ Api Wasm Engine
     wasmtime::Engine engineCpp;
     wasm_engine_t   *raw_engine = engineCpp.capi();
@@ -110,10 +110,12 @@ TEST_CASE("WasmStore Lifecycle", "[wasm]")
 
 TEST_CASE("Parser Wasm Exceptions and Guardrails", "[wasm][parser][exceptions]")
 {
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
+    // C++ Api Wasm Engine
     wasmtime::Engine engine;
     ts::WasmStore    store(engine.capi());
 #else
+    // C Api Wasm Engine
     wasm_engine_t *engine = wasm_engine_new();
     ts::WasmStore  store(engine);
 #endif
@@ -126,7 +128,7 @@ TEST_CASE("Parser Wasm Exceptions and Guardrails", "[wasm][parser][exceptions]")
 
         CHECK_FALSE(parser.hasWasmStore());
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
         auto res = parser.setLanguage(json_lang);
         REQUIRE_FALSE(res.has_value());
         CHECK_THAT(res.error(), Catch::Matchers::ContainsSubstring("WasmStore"));
@@ -147,10 +149,12 @@ TEST_CASE("Parser Wasm Exceptions and Guardrails", "[wasm][parser][exceptions]")
 
 TEST_CASE("Parser Constructor and WasmStore Transfer", "[wasm][parser]")
 {
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
+    // C++ Api Wasm Engine
     wasmtime::Engine engine;
     ts::WasmStore    store(engine.capi());
 #else
+    // C Api Wasm Engine
     wasm_engine_t *engine = wasm_engine_new();
     ts::WasmStore  store(engine);
 #endif
@@ -177,12 +181,14 @@ TEST_CASE("Parser Constructor and WasmStore Transfer", "[wasm][parser]")
 
 TEST_CASE("Replacing WasmStore in Parser", "[wasm][parser]")
 {
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
+    // C++ Api Wasm Engine
     wasmtime::Engine engine1;
     wasmtime::Engine engine2;
     ts::WasmStore    store1(engine1.capi());
     ts::WasmStore    store2(engine2.capi());
 #else
+    // C Api Wasm Engine
     wasm_engine_t *engine1 = wasm_engine_new();
     wasm_engine_t *engine2 = wasm_engine_new();
     ts::WasmStore  store1(engine1);
@@ -210,11 +216,17 @@ TEST_CASE("Replacing WasmStore in Parser", "[wasm][parser]")
     }
 }
 
-#if TS_TEST_HAS_CXX23
+#if CPP_TS_TEST_HAS_CXX23
 TEST_CASE("Wasm C++23 Features", "[wasm][cxx23]")
 {
+#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
+    // C++ Api Wasm Engine
     wasmtime::Engine engine;
     wasm_engine_t   *raw_engine = engine.capi();
+#else
+    // C Api Wasm Engine
+    wasm_engine_t *raw_engine = wasm_engine_new();
+#endif
 
     SECTION("WasmStore::create success")
     {

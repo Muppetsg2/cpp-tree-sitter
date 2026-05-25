@@ -96,7 +96,14 @@ TEST_CASE("Language Deep Dive", "[language]")
         ts::StateID initial_state = 0;
         ts::Symbol  document_sym  = lang.getSymbolForName("document", true);
 
-        [[maybe_unused]] ts::StateID next_state = lang.getNextState(initial_state, document_sym);
+#if CPP_TS_TEST_HAS_CXX17
+        [[maybe_unused]]
+#endif
+        ts::StateID next_state = lang.getNextState(initial_state, document_sym);
+
+#if !CPP_TS_TEST_HAS_CXX17
+        (void)next_state;
+#endif
 
         ts::LookaheadIterator li = lang.getLookaheadIterator(initial_state);
         CHECK(li.getLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());
@@ -104,7 +111,7 @@ TEST_CASE("Language Deep Dive", "[language]")
 
     SECTION("Metadata")
     {
-#if TS_TEST_HAS_CXX17
+#if CPP_TS_TEST_HAS_CXX17
         auto meta = lang.getMetadata();
         if (meta)
         {
@@ -193,7 +200,7 @@ TEST_CASE("Language Invalid State Handling", "[language][error_handling]")
         CHECK(invalid_lang.getName().empty());
         CHECK(invalid_lang.getVersion() == 0);
 
-#if TS_HAS_CXX17
+#if CPP_TS_TEST_HAS_CXX17
         CHECK_FALSE(invalid_lang.getMetadata().has_value());
 #else
         ts::LanguageMetadata meta = invalid_lang.getMetadata();
@@ -223,6 +230,7 @@ TEST_CASE("Language Edge Cases", "[language]")
         CHECK(lang.getAllSubTypesForSuperType(9999).empty());
     }
 
+#if SIZE_MAX > UINT32_MAX
     SECTION("Throw exception on size overflow")
     {
         // We bypass the real 4GB allocation by creating an artificial view, but with a given gigantic size.
@@ -234,4 +242,5 @@ TEST_CASE("Language Edge Cases", "[language]")
         CHECK_THROWS_AS(lang.getSymbolForName(huge_view, true), std::length_error);
         CHECK_THROWS_AS(lang.getFieldIDForName(huge_view), std::length_error);
     }
+#endif
 }

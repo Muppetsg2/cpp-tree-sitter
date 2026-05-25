@@ -4,6 +4,27 @@ set(CPP_TS_NECESSARY_COMPILE_OPTIONS
 	>
 )
 
+set(TS_ERROR_COMPILE_OPTIONS
+    $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
+		$<$<CONFIG:Debug>:/RTC1>
+        /wd4018 # disable 'signed/unsigned mismatch'
+        /wd4232 # disable 'nonstandard extension used'
+        /wd4244 # disable 'possible loss of data'
+        /wd4267 # disable 'possible loss of data (size_t)'
+        /wd4701 # disable 'potentially uninitialized local variable'
+        /we4022 # treat 'incompatible types' as an error
+        /W4
+    >
+    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+        -Wno-unused-but-set-variable
+		-Wno-conversion
+		-Wall
+		-Wextra
+        -Wshadow
+        -Wpedantic
+    >
+)
+
 set(TS_NO_IPO_COMPILE_OPTIONS
 	$<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
 		$<$<CONFIG:Release>:/O2>
@@ -28,7 +49,7 @@ set(TS_NO_IPO_LINK_OPTIONS
 	>
 )
 
-function(print_config_option NAME)
+function(cpp_ts_print_config_option NAME)
 	message(STATUS "${NAME} = ${${NAME}}")
 endfunction()
 

@@ -15,12 +15,7 @@ project(
 )
 
 # OPTIONS
-set(CPP_TS_BUILD_TESTS_DEFAULT OFF)
-if(PROJECT_IS_TOP_LEVEL)
-    set(CPP_TS_BUILD_TESTS_DEFAULT ON)
-endif()
-
-option(CPP_TS_BUILD_TESTS "Build test for cpp-tree-sitter" ${CPP_TS_BUILD_TESTS_DEFAULT})
+option(CPP_TS_BUILD_TESTS "Build test for cpp-tree-sitter" ${PROJECT_IS_TOP_LEVEL})
 option(CPP_TS_FEATURE_WASM "Enable the Wasm feature" OFF)
 option(CPP_TS_AMALGAMATED "Build using an amalgamated source" ON)
 option(CPP_TS_MSVC_STATIC_RUNTIME "Use static MSVC runtime (/MT or /MTd)" OFF)
@@ -44,12 +39,12 @@ if(NOT CPP_TS_WASMTIME_PATH)
 endif()
 
 message(STATUS "========== cpp-tree-sitter configuration ==========")
-print_config_option(CPP_TS_BUILD_TESTS)
-print_config_option(CPP_TS_FEATURE_WASM)
-print_config_option(CPP_TS_AMALGAMATED)
-print_config_option(CPP_TS_MSVC_STATIC_RUNTIME)
-print_config_option(CPP_TS_WASMTIME_VERSION)
-print_config_option(CPP_TS_WASMTIME_PATH)
+cpp_ts_print_config_option(CPP_TS_BUILD_TESTS)
+cpp_ts_print_config_option(CPP_TS_FEATURE_WASM)
+cpp_ts_print_config_option(CPP_TS_AMALGAMATED)
+cpp_ts_print_config_option(CPP_TS_MSVC_STATIC_RUNTIME)
+cpp_ts_print_config_option(CPP_TS_WASMTIME_VERSION)
+cpp_ts_print_config_option(CPP_TS_WASMTIME_PATH)
 message(STATUS "===================================================")
 
 # We want to automatically download and provide tree-sitter to users of
@@ -78,6 +73,12 @@ if(tree-sitter_ADDED)
 		POSITION_INDEPENDENT_CODE ON
 	)
 	target_compile_features(tree-sitter PRIVATE c_std_11)
+	target_compile_options(tree-sitter PRIVATE 
+		${TS_ERROR_COMPILE_OPTIONS}
+		$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
+			-Werror=incompatible-pointer-types
+		>
+	)
 
 	# Check IPO
 	message(CHECK_START "Checking for linker IPO support")
@@ -120,15 +121,30 @@ endif()
 if(CPP_TS_FEATURE_WASM)
 	set(WASMTIME_INCLUDE_DIR "")
 	set(WASMTIME_LIB_DIR "")
+	
 	if(NOT CPP_TS_WASMTIME_PATH)
 		set(WASM_VERSION "${CPP_TS_WASMTIME_VERSION}")
-		if(WIN32)
-			set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-windows-c-api.zip")
-		elseif(APPLE)
-			set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-macos-c-api.tar.xz")
-		elseif(UNIX)
-			set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-x86_64-linux-c-api.tar.xz")
+
+		if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+			set(WASM_ARCH "aarch64")
+		elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+			set(WASM_ARCH "x86_64")
+		else()
+			set(WASM_ARCH "i686")
 		endif()
+
+		if(WIN32)
+			set(WASM_PLATFORM "windows")
+			set(WASM_ARCHIVE_EXT "zip")
+		elseif(APPLE)
+			set(WASM_PLATFORM "macos")
+			set(WASM_ARCHIVE_EXT "tar.xz")
+		elseif(UNIX)
+			set(WASM_PLATFORM "linux")
+			set(WASM_ARCHIVE_EXT "tar.xz")
+		endif()
+
+		set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-${WASM_ARCH}-${WASM_PLATFORM}-c-api.${WASM_ARCHIVE_EXT}")
 
 		CPMAddPackage(
 			NAME wasmtime
@@ -171,7 +187,7 @@ if(CPP_TS_FEATURE_WASM)
 
 		# Project
 		target_include_directories(${PROJECT_NAME} INTERFACE ${WASMTIME_INCLUDE_DIR})
-		target_compile_definitions(${PROJECT_NAME} INTERFACE CPP_TREE_SITTER_FEATURE_WASM)
+		target_compile_definitions(${PROJECT_NAME} INTERFACE CPP_TS_FEATURE_WASM)
 
 		# Tree-Sitter
 		target_include_directories(tree-sitter PRIVATE ${WASMTIME_INCLUDE_DIR})
@@ -203,5 +219,7 @@ if(CPP_TS_FEATURE_WASM)
 endif()
 
 if(CPP_TS_BUILD_TESTS)
+	include(CTest)
+	enable_testing()
 	add_subdirectory(tests)
 endif()

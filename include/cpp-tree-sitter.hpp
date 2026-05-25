@@ -23,16 +23,16 @@
 /////////////////////////////////////////////////////////////////////////////
 
 #if defined(_MSVC_LANG)
-#define TS_CXX_LEVEL _MSVC_LANG
+#define CPP_TS_CXX_LEVEL _MSVC_LANG
 #else
-#define TS_CXX_LEVEL __cplusplus
+#define CPP_TS_CXX_LEVEL __cplusplus
 #endif
 
-#define TS_HAS_CXX17 (TS_CXX_LEVEL >= 201703L)
-#define TS_HAS_CXX20 (TS_CXX_LEVEL >= 202002L)
-#define TS_HAS_CXX23 (TS_CXX_LEVEL >= 202302L)
+#define CPP_TS_HAS_CXX17 (CPP_TS_CXX_LEVEL >= 201703L)
+#define CPP_TS_HAS_CXX20 (CPP_TS_CXX_LEVEL >= 202002L)
+#define CPP_TS_HAS_CXX23 (CPP_TS_CXX_LEVEL >= 202302L)
 
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
 #include <filesystem>
 #include <optional>
 #include <string_view>
@@ -40,29 +40,29 @@
 #include <utility>
 #endif
 
-#if TS_HAS_CXX20
+#if CPP_TS_HAS_CXX20
 #include <concepts>
 #include <ranges>
 #include <span>
 #endif
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
 #include <expected>
 #endif
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
 // On Windows we get descriptor using _fileno
 #include <io.h>
-#define TS_FILENO _fileno
+#define CPP_TS_FILENO _fileno
 // On Windows we create duplicate of descriptor using _dup
-#define TS_DUP _dup
+#define CPP_TS_DUP _dup
 #else
 // On POSIX systems we use fileno from <cstdio>
 #include <cstdio>
-#define TS_FILENO fileno
+#define CPP_TS_FILENO fileno
 // On POSIX systems we use dup from <unistd.h>
 #include <unistd.h>
-#define TS_DUP dup
+#define CPP_TS_DUP dup
 #endif
 
 #include <tree_sitter/api.h>
@@ -79,11 +79,11 @@ namespace ts
     class TreeCursor;
     class LookaheadIterator;
     class QueryCursor;
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
     class WasmStore;
 #endif
 
-#if !TS_HAS_CXX17
+#if !CPP_TS_HAS_CXX17
     class StringView
     {
     public:
@@ -221,7 +221,7 @@ namespace ts
     // Direct alias of { major_version: uint8_t; minor_version: uint8_t; patch_version: uint8_t }
     using LanguageMetadata = TSLanguageMetadata;
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
     using WasmEngine = wasm_engine_t;
 #endif
     using StateID = uint16_t;
@@ -251,7 +251,7 @@ namespace ts
 
     namespace details
     {
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
         using StringViewParameter = const std::string_view;
         using StringViewReturn    = std::string_view;
         using ByteViewU8_t        = const std::basic_string_view<uint8_t>;
@@ -322,7 +322,7 @@ namespace ts
             }
         };
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         struct WasmErrorHelper
         {
             static std::string format_error(const TSWasmError &error)
@@ -373,7 +373,7 @@ namespace ts
 
         [[nodiscard]] static std::string get_grammar_name_from_file(StringViewParameter path)
         {
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
             std::string name = std::filesystem::path(path).stem().string();
 #else
             std::string filename = std::string(path);
@@ -491,7 +491,7 @@ namespace ts
         }
     } // namespace details
 
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
     using DecodeFunction = std::function<uint32_t(details::ByteViewU8_t, int32_t *)>;
 #else
     using DecodeFunction = std::function<uint32_t(const uint8_t *, uint32_t, int32_t *)>;
@@ -579,7 +579,7 @@ namespace ts
             return row == other.row && column == other.column;
         }
 
-#if !TS_HAS_CXX20
+#if !CPP_TS_HAS_CXX20
         [[nodiscard]] bool operator!=(const Point &other) const noexcept
         {
             return !(*this == other);
@@ -781,7 +781,7 @@ namespace ts
             impl->read    = read_proxy;
         }
 
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
         static thread_local const Input *current_input_ptr;
 #else
         static const Input *&current_ptr() noexcept
@@ -812,7 +812,7 @@ namespace ts
 
         [[nodiscard]] static uint32_t decode_proxy(const uint8_t *string, uint32_t length, int32_t *code_point) noexcept
         {
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
             if (current_input_ptr && current_input_ptr->decode)
             {
                 // basic_string_view<uint8_t>, int32_t *
@@ -852,7 +852,7 @@ namespace ts
         std::unique_ptr<TSInput> impl;
     };
 
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
     inline thread_local const Input *Input::current_input_ptr = nullptr;
 #endif
 
@@ -1125,7 +1125,7 @@ namespace ts
             return is_valid;
         }
 
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
         [[nodiscard]] std::optional<LanguageMetadata> getMetadata() const noexcept
 #else
         [[nodiscard]] LanguageMetadata getMetadata() const noexcept
@@ -1133,7 +1133,7 @@ namespace ts
         {
             if (!is_valid)
             {
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
                 return std::nullopt;
 #else
                 return { 0, 0, 0 };
@@ -1142,7 +1142,7 @@ namespace ts
             const TSLanguageMetadata *metadata = ts_language_metadata(impl.get());
             if (!metadata)
             {
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
                 return std::nullopt;
 #else
                 return { 0, 0, 0 };
@@ -1151,7 +1151,7 @@ namespace ts
             return LanguageMetadata{ metadata->major_version, metadata->minor_version, metadata->patch_version };
         }
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         [[nodiscard]] bool isWasm() const noexcept
         {
             if (!is_valid)
@@ -1677,7 +1677,7 @@ namespace ts
             return ts_node_eq(impl, other.impl);
         }
 
-#if !TS_HAS_CXX20
+#if !CPP_TS_HAS_CXX20
         [[nodiscard]] bool operator!=(const Node &other) const noexcept
         {
             return !(*this == other);
@@ -1880,7 +1880,7 @@ namespace ts
                 return;
             }
 
-            printDotGraph(TS_FILENO(file));
+            printDotGraph(CPP_TS_FILENO(file));
         }
 
         void printDotGraph(details::StringViewParameter path)
@@ -1969,7 +1969,7 @@ namespace ts
                 throw std::runtime_error("Tree-sitter: Passed Language for Parser was invalid");
             }
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
             if (auto res = setLanguage(language); !res.has_value())
             {
                 throw std::runtime_error(res.error());
@@ -1982,7 +1982,7 @@ namespace ts
 #endif
         }
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         Parser(Language language, WasmStore &store) : impl{ ts_parser_new(), ts_parser_delete }
         {
             if (!language.isValid())
@@ -1992,7 +1992,7 @@ namespace ts
 
             setWasmStore(store);
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
             if (auto res = setLanguage(language); !res.has_value())
             {
                 throw std::runtime_error(res.error());
@@ -2006,7 +2006,7 @@ namespace ts
         }
 #endif
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
         [[nodiscard]] static inline std::expected<Parser, std::string> create(Language language) noexcept
         {
             if (!language.isValid())
@@ -2023,7 +2023,7 @@ namespace ts
             return parser;
         }
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         [[nodiscard]] static inline std::expected<Parser, std::string> create(Language   language,
                                                                               WasmStore &store) noexcept;
 #endif
@@ -2034,10 +2034,10 @@ namespace ts
         ////////////////////////////////////////////////////////////////
 
         [[nodiscard]]
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
         std::expected<bool, std::string> setLanguage(Language language)
         {
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
             if (language.isWasm() && !wasm_store_set)
             {
                 return std::unexpected("Tree-sitter: Parser needs WasmStore to process Wasm Language");
@@ -2050,7 +2050,7 @@ namespace ts
             }
 #else
         bool setLanguage(Language language)
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         {
             if (language.isWasm() && !wasm_store_set)
             {
@@ -2067,7 +2067,7 @@ namespace ts
         }
 
         [[nodiscard]]
-#if TS_HAS_CXX20
+#if CPP_TS_HAS_CXX20
         bool setIncludedRanges(std::span<const Range> ranges)
 #else
         bool setIncludedRanges(const std::vector<Range> &ranges)
@@ -2123,7 +2123,7 @@ namespace ts
             return ts_parser_set_included_ranges(impl.get(), merged.data(), static_cast<uint32_t>(merged.size()));
         }
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         // Passing a WasmStore invalidates it. The parser takes control of the WasmStore. You can retrieve it using the
         // takeWasmStore() function. If you set a new WasmStore without retrieving the previous one, the previous
         // instance will be discarded.
@@ -2158,7 +2158,7 @@ namespace ts
             return vec;
         }
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         // If the set language is WebAssembly, it will be removed from the parser.
         [[nodiscard]] WasmStore takeWasmStore() noexcept;
 #endif
@@ -2172,7 +2172,7 @@ namespace ts
             return language_set;
         }
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         [[nodiscard]] bool hasWasmStore() const noexcept
         {
             return wasm_store_set;
@@ -2192,7 +2192,7 @@ namespace ts
                 throw std::logic_error("Tree-sitter: Cannot parse without a language. Use setLanguage() first.");
             }
 
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
             Input::current_input_ptr = &input;
 #else
             Input::current_ptr() = &input;
@@ -2211,7 +2211,7 @@ namespace ts
                 new_tree = ts_parser_parse(impl.get(), raw_old_tree, input);
             }
 
-#if TS_HAS_CXX17
+#if CPP_TS_HAS_CXX17
             Input::current_input_ptr = nullptr;
 #else
             Input::current_ptr() = nullptr;
@@ -2270,7 +2270,7 @@ namespace ts
             if (file_descriptor >= 0)
             {
                 // Creates duplicate of user descriptor
-                int duplicated_fd = TS_DUP(file_descriptor);
+                int duplicated_fd = CPP_TS_DUP(file_descriptor);
 
                 if (duplicated_fd == -1)
                 {
@@ -2289,7 +2289,7 @@ namespace ts
         {
             if (file)
             {
-                enableDotGraphs(TS_FILENO(file));
+                enableDotGraphs(CPP_TS_FILENO(file));
             }
         }
 
@@ -2362,7 +2362,7 @@ namespace ts
         std::unique_ptr<TSParser, decltype(&ts_parser_delete)> impl;
         std::function<void(LogType, const char *)>             current_logger;
         bool                                                   language_set = false;
-#if defined(CPP_TS_TEST_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
         bool wasm_store_set = false;
 #endif
     };
@@ -2599,7 +2599,7 @@ namespace ts
             return getCurrentNode() == other.getCurrentNode();
         }
 
-#if !TS_HAS_CXX20
+#if !CPP_TS_HAS_CXX20
         [[nodiscard]] bool operator!=(const TreeCursor &other) const noexcept
         {
             return !(*this == other);
@@ -2755,7 +2755,7 @@ namespace ts
             impl.reset(query);
         }
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
         [[nodiscard]] static inline std::expected<Query, std::string> create(
                 Language                     language,
                 details::StringViewParameter source) noexcept
@@ -2920,7 +2920,7 @@ namespace ts
     private:
         std::unique_ptr<TSQuery, decltype(&ts_query_delete)> impl{ nullptr, ts_query_delete };
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
         explicit Query(TSQuery *raw_query) : impl(raw_query, ts_query_delete)
         {}
 #endif
@@ -3161,7 +3161,7 @@ namespace ts
         return LookaheadIterator(impl.get(), state);
     }
 
-#if defined(CPP_TREE_SITTER_FEATURE_WASM)
+#if defined(CPP_TS_FEATURE_WASM)
     /////////////////////////////////////////////////////////////////////////////
     // WasmStore
     // Manages WebAssembly environments and loading Wasm-based languages.
@@ -3197,7 +3197,7 @@ namespace ts
         WasmStore(const WasmStore &)     = delete;
         WasmStore(WasmStore &&) noexcept = default;
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
         [[nodiscard]] static std::expected<WasmStore, std::string> create(WasmEngine *engine) noexcept
         {
             TSWasmError  error{ TSWasmErrorKindNone, nullptr };
@@ -3285,7 +3285,7 @@ namespace ts
             return loadLanguage(lang_name, buffer);
         }
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
         [[nodiscard]] std::expected<Language, std::string> loadLanguageExpected(
                 details::StringViewParameter name,
                 details::StringViewParameter wasm_buffer) noexcept
@@ -3417,7 +3417,7 @@ namespace ts
         return WasmStore{ raw_store };
     }
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
     [[nodiscard]] inline std::expected<Parser, std::string> Parser::create(Language language, WasmStore &store) noexcept
     {
         if (!language.isValid())
@@ -3443,8 +3443,10 @@ namespace ts
     // STL-compatible iterators for processing Node children.
     /////////////////////////////////////////////////////////////////////////////
 
+#if CPP_TS_HAS_CXX17
     class ChildIteratorSentinel
     {};
+#endif
 
     class ChildIterator
     {
@@ -3463,18 +3465,19 @@ namespace ts
             explicit Child(value_type v) noexcept : value(v)
             {}
 
-#if TS_HAS_CXX23
+#if CPP_TS_HAS_CXX23
             template <typename Self>
-            auto *operator->(this Self &&self) noexcept
+            [[nodiscard]] auto *operator->(this Self &&self) noexcept
             {
                 return &self.value;
             }
 #else
-            const value_type *operator->() const noexcept
+            [[nodiscard]] const value_type *operator->() const noexcept
             {
                 return &value;
             }
-            value_type *operator->() noexcept
+
+            [[nodiscard]] value_type *operator->() noexcept
             {
                 return &value;
             }
@@ -3512,10 +3515,6 @@ namespace ts
             return get();
         }
 
-        ////////////////////////////////////////////////////////////////
-        // Advance
-        ////////////////////////////////////////////////////////////////
-
         Child operator->() const noexcept
         {
             // Dereference this iterator to get the value,
@@ -3523,9 +3522,16 @@ namespace ts
             return Child(get());
         }
 
+        ////////////////////////////////////////////////////////////////
+        // Advance
+        ////////////////////////////////////////////////////////////////
+
         ChildIterator &operator++() noexcept
         {
-            atEnd = !cursor.gotoNextSibling();
+            if (!atEnd)
+            {
+                atEnd = !cursor.gotoNextSibling();
+            }
             return *this;
         }
 
@@ -3535,30 +3541,80 @@ namespace ts
         }
 
         ////////////////////////////////////////////////////////////////
-        // Comparision
+        // Retreat
         ////////////////////////////////////////////////////////////////
 
+        ChildIterator &operator--() noexcept
+        {
+            if (atEnd)
+            {
+                atEnd = false;
+            }
+            else
+            {
+                cursor.gotoPreviousSibling();
+            }
+            return *this;
+        }
+
+        ChildIterator &operator--(int) noexcept
+        {
+            return --(*this);
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Sentinels Comparision
+        ////////////////////////////////////////////////////////////////
+
+#if CPP_TS_HAS_CXX17
         [[nodiscard]] friend bool operator==(const ChildIterator &a, const ChildIteratorSentinel &) noexcept
         {
             return a.atEnd;
         }
 
-#if !TS_HAS_CXX20
+#if !CPP_TS_HAS_CXX20
         [[nodiscard]] friend bool operator!=(const ChildIterator &a, const ChildIteratorSentinel &b) noexcept
         {
             return !(a == b);
         }
 #endif
 
-        [[nodiscard]] friend bool operator==(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
+        [[nodiscard]] friend bool operator==(const ChildIteratorSentinel &a, const ChildIterator &b) noexcept
         {
-            return a == b;
+            return b == a;
         }
 
-#if !TS_HAS_CXX20
-        [[nodiscard]] friend bool operator!=(const ChildIteratorSentinel &b, const ChildIterator &a) noexcept
+#if !CPP_TS_HAS_CXX20
+        [[nodiscard]] friend bool operator!=(const ChildIteratorSentinel &a, const ChildIterator &b) noexcept
         {
-            return a != b;
+            return b != a;
+        }
+#endif
+#endif
+
+        ////////////////////////////////////////////////////////////////
+        // Comparision
+        ////////////////////////////////////////////////////////////////
+
+        [[nodiscard]] friend bool operator==(const ChildIterator &a, const ChildIterator &b) noexcept
+        {
+            if (a.atEnd && b.atEnd)
+            {
+                return true;
+            }
+
+            if (a.atEnd != b.atEnd)
+            {
+                return false;
+            }
+
+            return a.cursor == b.cursor;
+        }
+
+#if !CPP_TS_HAS_CXX20
+        [[nodiscard]] friend bool operator!=(const ChildIterator &a, const ChildIterator &b) noexcept
+        {
+            return !(a == b);
         }
 #endif
 
@@ -3574,26 +3630,30 @@ namespace ts
         bool           atEnd = false;
     };
 
-#if TS_HAS_CXX20
+#if CPP_TS_HAS_CXX20
     struct Children : public std::ranges::view_interface<Children>
 #else
     struct Children
 #endif
     {
         using iterator = ChildIterator;
+#if CPP_TS_HAS_CXX17
         using sentinel = ChildIteratorSentinel;
+#else
+        using sentinel = ChildIterator;
+#endif
 
         explicit Children(const ts::Node &n) noexcept : node_ref(n)
         {}
 
         iterator begin() const noexcept
         {
-            return ChildIterator{ node_ref };
+            return iterator{ node_ref };
         }
 
         sentinel end() const noexcept
         {
-            return {};
+            return sentinel{};
         }
 
         [[nodiscard]] size_t size() const noexcept
@@ -3604,7 +3664,7 @@ namespace ts
         ts::Node node_ref;
     };
 
-#if TS_HAS_CXX20
+#if CPP_TS_HAS_CXX20
     static_assert(std::input_iterator<ChildIterator>);
     static_assert(std::sentinel_for<ChildIteratorSentinel, ChildIterator>);
 #endif
@@ -3618,12 +3678,12 @@ namespace ts
     // Concepts
     ////////////////////////////////////////////////////////////////
 
-#if TS_HAS_CXX20
+#if CPP_TS_HAS_CXX20
     template <typename T>
     concept VisitorConcept = requires {
         { std::declval<T>()(std::declval<Node>()) } -> std::convertible_to<bool>;
     };
-#elif TS_HAS_CXX17
+#elif CPP_TS_HAS_CXX17
     template <typename T, typename = void>
     struct VisitorConcept : std::false_type
     {};
@@ -3640,9 +3700,9 @@ namespace ts
     // Function
     ////////////////////////////////////////////////////////////////
 
-#if TS_HAS_CXX20
+#if CPP_TS_HAS_CXX20
     template <VisitorConcept F>
-#elif TS_HAS_CXX17
+#elif CPP_TS_HAS_CXX17
     template <typename F, std::enable_if_t<VisitorConcept<F>::value, bool> = true>
 #else
 template <typename F>

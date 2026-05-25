@@ -10,8 +10,6 @@ if(NOT CPP_TS_FEATURE_WASM)
     list(REMOVE_ITEM TESTS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/wasm-tests.cpp")
 endif()
 
-enable_testing()
-
 add_executable(${TARGET_NAME} ${TESTS_FILES})
 
 target_precompile_headers(${TARGET_NAME} PUBLIC ${PCH_FILE})
@@ -98,17 +96,11 @@ if(Catch2_ADDED)
 endif()
 
 target_compile_options(${TARGET_NAME} PRIVATE
+    ${TS_ERROR_COMPILE_OPTIONS}
     $<$<OR:$<CXX_COMPILER_ID:MSVC>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:
         $<$<CONFIG:Debug>:/RTC1>
         /Zc:preprocessor
         /Zc:__cplusplus
-        /W4
-    >
-    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:AppleClang>,$<AND:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_FRONTEND_VARIANT:GNU>>>:
-        -Wno-unused-but-set-variable
-		-Wno-conversion
-		-Wall
-		-Wextra
     >
 )
 
@@ -162,6 +154,14 @@ endif()
 if(CPP_TS_FEATURE_WASM)
     target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_FEATURE_WASM)
     target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_WASM_FILES_DIR="${CPP_TS_WASM_DIR}")
+
+    string(REPLACE "." ";" VERSION_LIST ${CPP_TS_WASMTIME_VERSION})
+    list(GET VERSION_LIST 0 VER_MAJOR)
+    list(GET VERSION_LIST 1 VER_MINOR)
+    list(GET VERSION_LIST 2 VER_PATCH)
+
+    math(EXPR CPP_TS_WT_VERSION "${VER_MAJOR} * 10000 + ${VER_MINOR} * 100 + ${VER_PATCH}")
+    target_compile_definitions(${TARGET_NAME} PRIVATE CPP_TS_TEST_WASMTIME_VERSION=${CPP_TS_WT_VERSION})
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE 
@@ -171,7 +171,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 )
 
 list(APPEND CMAKE_MODULE_PATH ${Catch2_Extras})
-include(CTest)
 include(Catch)
 catch_discover_tests(
 	${TARGET_NAME}
