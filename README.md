@@ -66,13 +66,15 @@ You can set these options using `-DOPTION=VALUE` during the CMake configuration 
 
 These variables control dependency versions and where the library looks for external tools or grammars.
 
+* `CPP_TS_GRAMMAR_PATH`: A global directory where you store your Tree-sitter grammars. If set, `CPPTSAddGrammar` will first look here before attempting to download from Git.
+
 * `CPP_TS_WASMTIME_VERSION`: Defines the version of `wasmtime` to fetch if WASM support is enabled. **Note:** The current officially supported version of wasmtime-c-api by tree-sitter is v36.0.9. However a newer versions generally work. You can override this to e.g. 45.0.0 or any other version if you require strict compatibility.
 
 * `CPP_TS_WASMTIME_PATH`: Path to a local `wasmtime` installation. If not set and WASM is enabled, CMake will automatically download the appropriate binary for your system.
 
-* `CPP_TS_GRAMMAR_PATH`: A global directory where you store your Tree-sitter grammars. If set, `CPPTSAddGrammar` will first look here before attempting to download from Git.
-
 * `CPP_TS_WASM_DIR`: (Default: `${CMAKE_BINARY_DIR}/wasm_files`) Directory where downloaded `.wasm` grammar files are stored. It is only valid if you pass option `FIND_ALSO_WASM_FILE` or `FIND_ONLY_WASM_FILE` to `CPPTSAddGrammar`
+
+>⚠️ **Windows Compiler Compatibility Note:** Please note that the pre-compiled `wasmtime-c-api` library for Windows is built using MSVC. Therefore, **it is not compatible** with `clang++` or `g++` (MinGW) toolchains on Windows environments. In these cases, it is recommended to build the Wasmtime library manually from source and provide the path to your custom build using the `CPP_TS_WASMTIME_PATH` CMake option.
 
 ## Grammar Management
 
