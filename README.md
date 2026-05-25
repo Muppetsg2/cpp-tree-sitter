@@ -158,5 +158,5 @@ The library now features a custom `StringView` for C++11/14 environments and det
 
 ## License
 This project is licensed under the [**MIT License**](LICENSE).\
-Copyright (c) 2023 Nick Sumner\
-Copyright (c) 2026 Muppetsg2
+Copyright (c) 2023 [Nick Sumner](https://github.com/nsumner)\
+Copyright (c) 2026 [Muppetsg2](https://github.com/Muppetsg2)
