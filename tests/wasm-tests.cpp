@@ -10,7 +10,7 @@
 #include <wasmtime.hh>
 #else
 #include <wasm.h>
-#endif
+#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
 
 // Catch2
 #include <catch2/catch_test_macros.hpp>
@@ -22,7 +22,7 @@
 
 #if CPP_TS_TEST_HAS_CXX23
 #include <expected>
-#endif
+#endif // CPP_TS_TEST_HAS_CXX23
 
 TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 {
@@ -33,7 +33,7 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
 #else
     // C Api Wasm Engine
     wasm_engine_t *engine = wasm_engine_new();
-#endif
+#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
 
     SECTION("Successful language loading and parsing")
     {
@@ -41,11 +41,12 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
         ts::WasmStore store(engine);
 
         // Loading compilated tree-spitter-json grammar
-        ts::Language json_lang{ nullptr };
+        ts::Language json_lang(nullptr);
+        CHECK_FALSE(json_lang.getView().isWasm());
         REQUIRE_NOTHROW(json_lang = store.loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm"));
 
         // Loaded language tests
-        REQUIRE(json_lang.isWasm());
+        REQUIRE(json_lang.getView().isWasm());
         REQUIRE(store.getLanguageCount() == 1);
 
         // Parser test using wasm
@@ -61,7 +62,7 @@ TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
         CHECK(res.value());
 #else
         CHECK(parser.setLanguage(json_lang));
-#endif
+#endif // CPP_TS_TEST_HAS_CXX23
 
         std::string code = R"({"test": 123})";
         ts::Tree    tree = parser.parseString(code);
@@ -96,7 +97,7 @@ TEST_CASE("WasmStore Lifecycle", "[wasm]")
 #else
     // C Api Wasm Engine
     wasm_engine_t *raw_engine = wasm_engine_new();
-#endif
+#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
 
     SECTION("RAII Safety")
     {
@@ -118,7 +119,7 @@ TEST_CASE("Parser Wasm Exceptions and Guardrails", "[wasm][parser][exceptions]")
     // C Api Wasm Engine
     wasm_engine_t *engine = wasm_engine_new();
     ts::WasmStore  store(engine);
-#endif
+#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
 
     ts::Language json_lang = store.loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
 
@@ -135,7 +136,7 @@ TEST_CASE("Parser Wasm Exceptions and Guardrails", "[wasm][parser][exceptions]")
 #else
         // The parser must reject a Wasm language if no WasmStore is provided
         CHECK_THROWS_AS(parser.setLanguage(json_lang), std::logic_error);
-#endif
+#endif // CPP_TS_TEST_HAS_CXX23
     }
 
     SECTION("Constructor throws on invalid language with WasmStore")
@@ -157,7 +158,7 @@ TEST_CASE("Parser Constructor and WasmStore Transfer", "[wasm][parser]")
     // C Api Wasm Engine
     wasm_engine_t *engine = wasm_engine_new();
     ts::WasmStore  store(engine);
-#endif
+#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
 
     ts::Language json_lang = store.loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
 
@@ -193,7 +194,7 @@ TEST_CASE("Replacing WasmStore in Parser", "[wasm][parser]")
     wasm_engine_t *engine2 = wasm_engine_new();
     ts::WasmStore  store1(engine1);
     ts::WasmStore  store2(engine2);
-#endif
+#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
 
     ts::Parser parser;
 
@@ -226,7 +227,7 @@ TEST_CASE("Wasm C++23 Features", "[wasm][cxx23]")
 #else
     // C Api Wasm Engine
     wasm_engine_t *raw_engine = wasm_engine_new();
-#endif
+#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
 
     SECTION("WasmStore::create success")
     {
@@ -242,7 +243,7 @@ TEST_CASE("Wasm C++23 Features", "[wasm][cxx23]")
 
         REQUIRE(lang_res.has_value());
         CHECK(lang_res->isValid());
-        CHECK(lang_res->isWasm());
+        CHECK(lang_res->getView().isWasm());
     }
 
     SECTION("loadLanguageExpected failure (invalid file)")
@@ -256,17 +257,17 @@ TEST_CASE("Wasm C++23 Features", "[wasm][cxx23]")
 
     SECTION("Parser::create with WasmStore success")
     {
-        auto store_res = ts::WasmStore::create(raw_engine);
-        auto lang      = store_res->loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
+        auto         store_res = ts::WasmStore::create(raw_engine);
+        ts::Language lang      = store_res->loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
 
-        // Testowanie statycznej fabryki parsera przyjmuj¹cej store
+        // Testing a static parser factory that accepts a store
         auto parser_res = ts::Parser::create(lang, *store_res);
 
         REQUIRE(parser_res.has_value());
         CHECK(parser_res->hasWasmStore());
-        CHECK_FALSE(store_res->isValid()); // Store powinien byæ przeniesiony (invalidated)
+        CHECK_FALSE(store_res->isValid()); // The store should be moved (invalidated)
     }
 }
-#endif
+#endif // CPP_TS_TEST_HAS_CXX23
 
-#endif
+#endif // defined(CPP_TS_TEST_FEATURE_WASM)

@@ -8,20 +8,21 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 // STL
+#include <cstdint>
 #include <string>
 
 extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("Visitor Simply Usage", "[visitor]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "[1, 2]";
     ts::Tree     tree = parser.parseString(code);
 
     SECTION("Visit all nodes")
     {
-        int total_nodes = 0;
+        std::uint32_t total_nodes = 0;
         ts::visit(tree.getRootNode(),
                   [&](ts::Node) -> bool
                   {
@@ -36,7 +37,7 @@ TEST_CASE("Visitor Simply Usage", "[visitor]")
 
 TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "[1, [2, 3]]";
     ts::Tree     tree = parser.parseString(code);
@@ -44,7 +45,7 @@ TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
 
     SECTION("Null node does not trigger callback")
     {
-        int calls = 0;
+        std::uint32_t calls = 0;
 
         // Passing a null node should hit the early return guard
         ts::visit(ts::Node::null(),
@@ -63,8 +64,8 @@ TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
         ts::Node outer_array = root.getNamedChild(0);
         ts::Node inner_array = outer_array.getNamedChild(1);
 
-        int  inner_nodes_count = 0;
-        bool escaped_subtree   = false;
+        std::uint32_t inner_nodes_count = 0;
+        bool          escaped_subtree   = false;
 
         ts::visit(inner_array,
                   [&](ts::Node n) -> bool
@@ -91,7 +92,7 @@ TEST_CASE("Visitor Edge Cases and Subtrees", "[visitor]")
         // Navigate to the leaf number node: '1'
         ts::Node number_node = root.getNamedChild(0).getNamedChild(0);
 
-        int calls = 0;
+        std::uint32_t calls = 0;
         ts::visit(number_node,
                   [&](ts::Node n) -> bool
                   {

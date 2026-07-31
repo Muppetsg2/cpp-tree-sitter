@@ -25,7 +25,8 @@ cmake_minimum_required(VERSION 3.30)
 
 project(MyParser)
 
-set(CMAKE_CXX_STANDARD 17) # Works with 11, 14, 17, 20, 23
+set(CMAKE_CXX_STANDARD 20) # Works with 11, 14, 17, 20, 23
+set(CPP_TS_CXX_STANDARD 20 CACHE STRING "") # Force the static library to build in C++20
 
 include(cmake/CPM.cmake)
 
@@ -33,7 +34,7 @@ include(cmake/CPM.cmake)
 CPMAddPackage(
     NAME cpp-tree-sitter
     GIT_REPOSITORY https://github.com/Muppetsg2/cpp-tree-sitter.git
-    VERSION 0.26.9
+    VERSION 0.26.11
 )
 
 # Download a grammar (e.g., JSON) and make it a CMake target
@@ -44,7 +45,11 @@ CPPTSAddGrammar(
 )
 
 add_executable(demo main.cpp)
-target_link_libraries(demo PRIVATE cpp-tree-sitter tree-sitter-json)
+# Link the compiled static library
+target_link_libraries(demo PRIVATE cpp-tree-sitter::cpp-tree-sitter tree-sitter-json)
+
+# OR use the header-only version to automatically inherit your project's C++ standard:
+# target_link_libraries(demo PRIVATE cpp-tree-sitter::header-only tree-sitter-json)
 ```
 
 ## CMake Configuration
@@ -68,13 +73,13 @@ These variables control dependency versions and where the library looks for exte
 
 * `CPP_TS_GRAMMAR_PATH`: A global directory where you store your Tree-sitter grammars. If set, `CPPTSAddGrammar` will first look here before attempting to download from Git.
 
-* `CPP_TS_WASMTIME_VERSION`: Defines the version of `wasmtime` to fetch if WASM support is enabled. **Note:** The current officially supported version of wasmtime-c-api by tree-sitter is v36.0.9. However a newer versions generally work. You can override this to e.g. 45.0.0 or any other version if you require strict compatibility.
+* `CPP_TS_CXX_STANDARD`: Specifies the C++ standard used to compile the `cpp-tree-sitter` static library. Valid options are `11`, `14`, `17`, `20`, or `23` (Default: `20`). **Note:** This setting does not affect the `cpp-tree-sitter-header-only` target, which automatically adapts to the C++ standard of the consuming project.
+
+* `CPP_TS_WASMTIME_VERSION`: Defines the version of `wasmtime` to fetch if WASM support is enabled. **Note:** The current officially supported version of wasmtime-c-api by tree-sitter is v36.0.12. However, newer versions generally work. You can override this to e.g. 47.0.2 or any other version if you require strict compatibility.
 
 * `CPP_TS_WASMTIME_PATH`: Path to a local `wasmtime` installation. If not set and WASM is enabled, CMake will automatically download the appropriate binary for your system.
 
 * `CPP_TS_WASM_DIR`: (Default: `${CMAKE_BINARY_DIR}/wasm_files`) Directory where downloaded `.wasm` grammar files are stored. It is only valid if you pass option `FIND_ALSO_WASM_FILE` or `FIND_ONLY_WASM_FILE` to `CPPTSAddGrammar`
-
->⚠️ **Windows Compiler Compatibility Note:** Please note that the pre-compiled `wasmtime-c-api` library for Windows is built using MSVC. Therefore, **it is not compatible** with `clang++` or `g++` (MinGW) toolchains on Windows environments. In these cases, it is recommended to build the Wasmtime library manually from source and provide the path to your custom build using the `CPP_TS_WASMTIME_PATH` CMake option.
 
 ## Grammar Management
 
@@ -101,15 +106,15 @@ This example demonstrates parsing a JSON string and using the visitor to inspect
 #include <iostream>
 #include <string>
 #include <functional>
-#include <cpp-tree-sitter.h>
+#include <cpp-tree-sitter.hpp>
 
 // Extern declaration for the grammar function
 extern "C" TSLanguage* tree_sitter_json();
 
 int main() {
     // Initialize language and parser
-    ts::Language language = tree_sitter_json();
-    ts::Parser parser{language};
+    ts::Language language(tree_sitter_json());
+    ts::Parser parser(language);
 
     // Parse source code into a syntax tree
     std::string code = "[1, null, \"example\"]";
@@ -126,7 +131,7 @@ int main() {
     });
 
     // Or use STL-style iteration
-    for (auto child : ts::Children{root}) {
+    for (const auto &child : ts::Children{root}) {
         std::cout << "Child type: " << child.getType() << "\n";
     }
 

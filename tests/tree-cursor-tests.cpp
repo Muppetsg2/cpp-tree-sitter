@@ -16,7 +16,7 @@ extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("TreeCursor navigation", "[cursor]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "[1, 2]";
     ts::Tree     tree = parser.parseString(code);
@@ -43,7 +43,7 @@ TEST_CASE("TreeCursor navigation", "[cursor]")
 
 TEST_CASE("TreeCursor Advanced Movements", "[cursor]")
 {
-    ts::Language   lang = tree_sitter_json();
+    ts::Language   lang(tree_sitter_json());
     ts::Parser     parser(lang);
     std::string    code   = "[1, [2, 3], 4]";
     ts::Tree       tree   = parser.parseString(code);
@@ -109,7 +109,7 @@ TEST_CASE("TreeCursor Invalid State Handling", "[cursor][exceptions]")
 
 TEST_CASE("TreeCursor Reset and Copy", "[cursor][lifecycle]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "[1, 2]";
     ts::Tree     tree = parser.parseString(code);
@@ -147,7 +147,7 @@ TEST_CASE("TreeCursor Reset and Copy", "[cursor][lifecycle]")
 
 TEST_CASE("TreeCursor Extended Navigation and Fields", "[cursor][navigation]")
 {
-    ts::Language   lang = tree_sitter_json();
+    ts::Language   lang(tree_sitter_json());
     ts::Parser     parser(lang);
     std::string    code   = R"({"key": 42})";
     ts::Tree       tree   = parser.parseString(code);
@@ -179,7 +179,7 @@ TEST_CASE("TreeCursor Extended Navigation and Fields", "[cursor][navigation]")
         CHECK(cursor.getCurrentFieldID() > 0);
 
         // Get descendant index relative to the parent
-        uint32_t index = cursor.getCurrentDescendantIndex();
+        std::uint32_t index = cursor.getCurrentDescendantIndex();
 
         // Verify we can jump directly back to this descendant
         REQUIRE(cursor.gotoParent()); // back to pair
@@ -194,7 +194,7 @@ TEST_CASE("TreeCursor Extended Navigation and Fields", "[cursor][navigation]")
         REQUIRE(cursor.gotoNextSibling()); // pair
 
         // 9 is the byte offset of the number '42'
-        int64_t index_byte = cursor.gotoFirstChildForByte(9);
+        std::int64_t index_byte = cursor.gotoFirstChildForByte(9);
         CHECK(index_byte >= 0);
         CHECK(cursor.getCurrentNode().getType().compare("number") == 0);
 
@@ -204,7 +204,7 @@ TEST_CASE("TreeCursor Extended Navigation and Fields", "[cursor][navigation]")
         REQUIRE(cursor.gotoNextSibling()); // pair
 
         // Point navigation (row 0, column 9)
-        int64_t index_point = cursor.gotoFirstChildForPoint({ 0, 9 });
+        std::int64_t index_point = cursor.gotoFirstChildForPoint({ 0, 9 });
         CHECK(index_point >= 0);
         CHECK(cursor.getCurrentNode().getType().compare("number") == 0);
     }
@@ -212,15 +212,14 @@ TEST_CASE("TreeCursor Extended Navigation and Fields", "[cursor][navigation]")
 
 TEST_CASE("TreeCursor Move Semantics", "[cursor][lifecycle]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "{}";
     ts::Tree     tree = parser.parseString(code);
 
-    ts::TreeCursor cursor1 = tree.getRootNode().getCursor();
-
     SECTION("Move Assignment Operator")
     {
+        ts::TreeCursor cursor1 = tree.getRootNode().getCursor();
         ts::TreeCursor cursor2 = ts::Node::null().getCursor();
         CHECK_FALSE(cursor2.isValid());
 
@@ -232,9 +231,32 @@ TEST_CASE("TreeCursor Move Semantics", "[cursor][lifecycle]")
 
     SECTION("Move Constructor")
     {
+        ts::TreeCursor cursor1 = tree.getRootNode().getCursor();
         ts::TreeCursor cursor2(std::move(cursor1));
 
         CHECK(cursor2.isValid());
         CHECK(cursor2.getCurrentNode().getType().compare("document") == 0);
+    }
+}
+
+TEST_CASE("TreeCursor Copy assignment regression", "[cursor][lifecycle]")
+{
+    ts::Language lang(tree_sitter_json());
+    ts::Parser   parser(lang);
+    std::string  code = "[1, 2]";
+    ts::Tree     tree = parser.parseString(code);
+
+    SECTION("Self assignment is safely handled by move mechanics")
+    {
+        ts::TreeCursor cursor1 = tree.getRootNode().getCursor();
+        REQUIRE(cursor1.isValid());
+
+        // C++ sometimes calls `std::move` on `self` (in specific loops). We check whether this will destroy the C
+        // structure:
+        ts::TreeCursor *p_cursor1 = &cursor1;
+        cursor1                   = std::move(*p_cursor1);
+
+        CHECK(cursor1.isValid());
+        CHECK(cursor1.getCurrentNode().getType().compare("document") == 0);
     }
 }

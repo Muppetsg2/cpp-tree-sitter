@@ -22,7 +22,7 @@ extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("Tree Incremental Parsing (Editing)", "[parser][tree]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
 
     std::string code = "[1, 2, 3]";
@@ -47,7 +47,7 @@ TEST_CASE("Tree Incremental Parsing (Editing)", "[parser][tree]")
         ts::Tree new_tree = parser.parseString(new_code, tree);
 #else
         ts::Tree new_tree = parser.parseString(new_code, &tree);
-#endif
+#endif // CPP_TS_TEST_HAS_CXX17
 
         CHECK_FALSE(new_tree.hasError());
         ts::Node new_root   = new_tree.getRootNode();
@@ -61,7 +61,7 @@ TEST_CASE("Tree Incremental Parsing (Editing)", "[parser][tree]")
 
 TEST_CASE("Tree Lifecycle and Operators", "[tree]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "[1, 2]";
     ts::Tree     tree = parser.parseString(code);
@@ -95,7 +95,7 @@ TEST_CASE("Tree Lifecycle and Operators", "[tree]")
 
 TEST_CASE("Tree Root and Offsets", "[tree]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "  [1]";
     ts::Tree     tree = parser.parseString(code);
@@ -118,7 +118,7 @@ TEST_CASE("Tree Root and Offsets", "[tree]")
 
 TEST_CASE("Tree Ranges and Changes", "[tree]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
 
     SECTION("Included Ranges")
@@ -126,11 +126,11 @@ TEST_CASE("Tree Ranges and Changes", "[tree]")
         std::string code = "[1, 2]";
         ts::Tree    tree = parser.parseString(code);
 
-        auto ranges = tree.getIncludedRanges();
+        std::vector<ts::Range> ranges = tree.getIncludedRanges();
         REQUIRE_FALSE(ranges.empty());
 
         CHECK(ranges[0].byte.start == 0);
-        CHECK(ranges[0].byte.end == std::numeric_limits<uint32_t>::max());
+        CHECK(ranges[0].byte.end == std::numeric_limits<std::uint32_t>::max());
     }
 
     SECTION("Changed Ranges after edit")
@@ -152,9 +152,9 @@ TEST_CASE("Tree Ranges and Changes", "[tree]")
         ts::Tree tree3 = parser.parseString(code2, tree2);
 #else
         ts::Tree tree3 = parser.parseString(code2, &tree2);
-#endif
+#endif // CPP_TS_TEST_HAS_CXX17
 
-        auto changed = ts::Tree::getChangedRanges(tree1, tree3);
+        std::vector<ts::Range> changed = ts::Tree::getChangedRanges(tree1, tree3);
 
         REQUIRE_FALSE(changed.empty());
 
@@ -165,7 +165,7 @@ TEST_CASE("Tree Ranges and Changes", "[tree]")
 
 TEST_CASE("Tree Error and Language", "[tree]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
 
     SECTION("hasError flag")
@@ -179,15 +179,15 @@ TEST_CASE("Tree Error and Language", "[tree]")
 
     SECTION("getLanguage")
     {
-        ts::Tree     tree      = parser.parseString("{}");
-        ts::Language tree_lang = tree.getLanguage();
+        ts::Tree         tree      = parser.parseString("{}");
+        ts::LanguageView tree_lang = tree.getLanguage();
         CHECK(tree_lang.operator const TSLanguage *() == lang.operator const TSLanguage *());
     }
 }
 
 TEST_CASE("Tree Debugging", "[tree]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     ts::Tree     tree = parser.parseString("true");
 
@@ -199,7 +199,7 @@ TEST_CASE("Tree Debugging", "[tree]")
         fopen_s(&f, temp_file, "w");
 #else
         FILE *f = fopen(temp_file, "w");
-#endif
+#endif // defined(_WIN32)
         REQUIRE(f != nullptr);
 
         tree.printDotGraph(f);
@@ -211,7 +211,7 @@ TEST_CASE("Tree Debugging", "[tree]")
         fopen_s(&f_check, temp_file, "r");
 #else
         FILE *f_check = fopen(temp_file, "r");
-#endif
+#endif // defined(_WIN32)
         REQUIRE(f_check != nullptr);
 
         fseek(f_check, 0, SEEK_END);
@@ -225,7 +225,7 @@ TEST_CASE("Tree Debugging", "[tree]")
 
 TEST_CASE("Tree printDotGraph by path", "[tree][debug]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code     = "{\"test\": 123}";
     ts::Tree     tree     = parser.parseString(code);
@@ -280,7 +280,7 @@ TEST_CASE("Tree Invalid State Handling", "[tree][exceptions]")
     {
         CHECK(invalid_tree.getIncludedRanges().empty());
 
-        ts::Language lang = tree_sitter_json();
+        ts::Language lang(tree_sitter_json());
         ts::Parser   parser(lang);
         ts::Tree     valid_tree = parser.parseString("{}");
 
@@ -303,7 +303,7 @@ TEST_CASE("Tree Invalid State Handling", "[tree][exceptions]")
 
 TEST_CASE("Tree Lifecycle Edge Cases", "[tree][lifecycle]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "[1, 2, 3]";
     ts::Tree     tree = parser.parseString(code);
@@ -329,7 +329,7 @@ TEST_CASE("Tree Lifecycle Edge Cases", "[tree][lifecycle]")
 
 TEST_CASE("Tree Unchanged Ranges", "[tree]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "{\"key\": \"value\"}";
 
@@ -340,7 +340,7 @@ TEST_CASE("Tree Unchanged Ranges", "[tree]")
 
         // Even though they are different tree instances, no structural edits
         // were recorded, so changed ranges should be empty.
-        auto changed = ts::Tree::getChangedRanges(tree1, tree2);
+        std::vector<ts::Range> changed = ts::Tree::getChangedRanges(tree1, tree2);
         CHECK(changed.empty());
     }
 }

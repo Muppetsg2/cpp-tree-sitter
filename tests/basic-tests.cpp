@@ -30,7 +30,7 @@ TEST_CASE("Basic data structures work correctly", "[types]")
 
     SECTION("Extent (Range) representation")
     {
-        ts::Extent<uint32_t> range{ 10, 20 };
+        ts::Extent<std::uint32_t> range{ 10, 20 };
         CHECK(range.start == 10);
         CHECK(range.end == 20);
     }
@@ -39,7 +39,7 @@ TEST_CASE("Basic data structures work correctly", "[types]")
 TEST_CASE("Basic End-to-End Parsing", "[integration][parser][tree][node]")
 {
     // 1. Initialize language and parser
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
 
     // 2. Parse a simple JSON string
@@ -77,7 +77,7 @@ TEST_CASE("Basic End-to-End Parsing", "[integration][parser][tree][node]")
 
 TEST_CASE("Basic Object and Field Navigation", "[integration][node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
 
     std::string code = R"({"name": "Mark"})";
@@ -106,7 +106,7 @@ TEST_CASE("Basic Object and Field Navigation", "[integration][node]")
 
 TEST_CASE("Basic Query Execution", "[integration][query]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
 
     std::string code = R"([{"id": 1}, {"id": 2}, {"id": 3}])";
@@ -127,7 +127,7 @@ TEST_CASE("Basic Query Execution", "[integration][query]")
         // Iterate through all matches
         while (cursor.nextMatch(match))
         {
-            for (const auto &capture : match.captures)
+            for (const ts::QueryCapture &capture : match.captures)
             {
                 captured_numbers.push_back(capture.node.getSourceText(code));
             }

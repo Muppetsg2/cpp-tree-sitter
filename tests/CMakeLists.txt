@@ -165,7 +165,7 @@ if(CPP_TS_FEATURE_WASM)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE 
-	${PROJECT_NAME}
+	${PROJECT_NAME}-header-only
     tree-sitter-json
 	Catch2::Catch2WithMain
 )

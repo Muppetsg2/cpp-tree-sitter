@@ -14,6 +14,10 @@
 #include <stdexcept>
 #include <string>
 
+#if CPP_TS_TEST_HAS_CXX17
+#include <string_view>
+#endif // CPP_TS_TEST_HAS_CXX17
+
 extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("Null Node Handling", "[node]")
@@ -59,7 +63,7 @@ TEST_CASE("Null Node Handling", "[node]")
 
 TEST_CASE("Node navigation and attributes", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = R"({"id": 123})";
     ts::Tree     tree = parser.parseString(code);
@@ -92,7 +96,7 @@ TEST_CASE("Node navigation and attributes", "[node]")
 
 TEST_CASE("Node Search by Position", "[node][search]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = R"({
   "key": "value"
@@ -116,7 +120,7 @@ TEST_CASE("Node Search by Position", "[node][search]")
 
 TEST_CASE("Node identification and language", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code     = "42";
     ts::Tree     tree     = parser.parseString(code);
@@ -139,7 +143,7 @@ TEST_CASE("Node identification and language", "[node]")
 
 TEST_CASE("Node flags and states", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
 
     SECTION("Normal node flags")
@@ -180,7 +184,7 @@ TEST_CASE("Node flags and states", "[node]")
 
 TEST_CASE("Node ranges and source", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code     = "  \"hello\"";
     ts::Tree     tree     = parser.parseString(code);
@@ -189,8 +193,8 @@ TEST_CASE("Node ranges and source", "[node]")
 
     SECTION("Byte and Point ranges")
     {
-        auto bytes  = str_node.getByteRange();
-        auto points = str_node.getPointRange();
+        ts::Extent<std::uint32_t> bytes  = str_node.getByteRange();
+        ts::Extent<ts::Point>     points = str_node.getPointRange();
 
         CHECK(bytes.start == 2);
         CHECK(bytes.end == 9);
@@ -207,7 +211,7 @@ TEST_CASE("Node ranges and source", "[node]")
 
 TEST_CASE("Node navigation (extended)", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code  = "[1, 2, 3]";
     ts::Tree     tree  = parser.parseString(code);
@@ -249,11 +253,12 @@ TEST_CASE("Node navigation (extended)", "[node]")
 
 TEST_CASE("Node Search and Fields (extended)", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
-    ts::Parser   parser(lang);
-    std::string  code = "{\"item\": 42}";
-    ts::Tree     tree = parser.parseString(code);
-    ts::Node     pair = tree.getRootNode().getNamedChild(0).getNamedChild(0);
+    ts::Language     lang(tree_sitter_json());
+    ts::LanguageView view = lang;
+    ts::Parser       parser(lang);
+    std::string      code = "{\"item\": 42}";
+    ts::Tree         tree = parser.parseString(code);
+    ts::Node         pair = tree.getRootNode().getNamedChild(0).getNamedChild(0);
 
     SECTION("Search for children")
     {
@@ -270,14 +275,14 @@ TEST_CASE("Node Search and Fields (extended)", "[node]")
         // "value" is second named child after "key"
         CHECK(pair.getFieldNameForNamedChild(1).compare("value") == 0);
 
-        uint16_t field_id = lang.getFieldIDForName("value");
+        std::uint16_t field_id = view.getFieldIDForName("value");
         CHECK_FALSE(pair.getChildByFieldID(field_id).isNull());
     }
 }
 
 TEST_CASE("Node Parsing State", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     ts::Tree     tree = parser.parseString("{\"a\": 1}");
     ts::Node     root = tree.getRootNode();
@@ -296,7 +301,7 @@ TEST_CASE("Node Parsing State", "[node]")
 
 TEST_CASE("Node Mutation", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "[1]";
     ts::Tree     tree = parser.parseString(code);
@@ -307,7 +312,7 @@ TEST_CASE("Node Mutation", "[node]")
         // Move node one byte to right
         ts::InputEdit edit{ 0, 0, 1, { 0, 0 }, { 0, 0 }, { 0, 1 } };
 
-        uint32_t old_start = node.getByteRange().start;
+        std::uint32_t old_start = node.getByteRange().start;
         node.edit(edit);
         CHECK(node.getByteRange().start == old_start + 1);
     }
@@ -315,7 +320,7 @@ TEST_CASE("Node Mutation", "[node]")
 
 TEST_CASE("Node Comparison", "[node]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     ts::Tree     tree  = parser.parseString("[1, 1]");
     ts::Node     root  = tree.getRootNode();
@@ -334,7 +339,7 @@ TEST_CASE("Node Comparison", "[node]")
 
 TEST_CASE("Node S-Expression", "[node]")
 {
-    ts::Language lang  = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Tree     tree  = ts::Parser(lang).parseString("[1]");
     auto         sexpr = tree.getRootNode().getSExpr();
 
@@ -344,7 +349,7 @@ TEST_CASE("Node S-Expression", "[node]")
 
 TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code  = "[1, 2, 3]";
     ts::Tree     tree  = parser.parseString(code);
@@ -353,8 +358,8 @@ TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
 
     SECTION("Out of bounds child access returns null node")
     {
-        uint32_t total_children       = array.getChildCount();
-        uint32_t total_named_children = array.getNamedChildCount();
+        std::uint32_t total_children       = array.getChildCount();
+        std::uint32_t total_named_children = array.getNamedChildCount();
 
         // Accessing exactly at the count index should return null node
         CHECK(array.getChild(total_children).isNull());
@@ -373,14 +378,14 @@ TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
 #if SIZE_MAX > UINT32_MAX
     SECTION("Field name size overflow throws length_error")
     {
-        const char      *fake_str      = "fake";
-        constexpr size_t overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
+        const char           *fake_str      = "fake";
+        constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
 
-        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+        const ts::StringView huge_view(fake_str, overflow_size);
 
         CHECK_THROWS_AS(array.getChildByFieldName(huge_view), std::length_error);
     }
-#endif
+#endif // SIZE_MAX > UINT32_MAX
 
     SECTION("Mutating a null node throws logic_error")
     {
@@ -393,7 +398,7 @@ TEST_CASE("Node Exceptions and Boundary Checks", "[node][exceptions]")
 
 TEST_CASE("Node Search and Descendants (Unnamed Variants)", "[node][search]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = R"({"key": "value"})";
     ts::Tree     tree = parser.parseString(code);
@@ -453,7 +458,7 @@ TEST_CASE("Extended Null Node Fallbacks", "[node][null]")
 
 TEST_CASE("Node Cursor Instantiation", "[node][cursor]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     ts::Tree     tree = parser.parseString("[1, 2]");
     ts::Node     root = tree.getRootNode();
@@ -484,18 +489,18 @@ TEST_CASE("Node Get Child By Type", "[node][search]")
 #if SIZE_MAX > UINT32_MAX
     SECTION("Throws std::length_error when input name exceeds 4GB limit")
     {
-        ts::Node                         node          = ts::Node::null();
-        const char                      *fake_str      = "fake";
-        constexpr size_t                 overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
-        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+        ts::Node              node          = ts::Node::null();
+        const char           *fake_str      = "fake";
+        constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+        const ts::StringView  huge_view(fake_str, overflow_size);
 
         CHECK_THROWS_AS(node.getChildByType(huge_view), std::length_error);
     }
-#endif
+#endif // SIZE_MAX > UINT32_MAX
 
     SECTION("Tree-based lookup using JSON grammar")
     {
-        ts::Language lang = tree_sitter_json();
+        ts::Language lang(tree_sitter_json());
         ts::Parser   parser(lang);
         std::string  code = R"({"key": 123})";
         ts::Tree     tree = parser.parseString(code);
@@ -550,11 +555,12 @@ TEST_CASE("Node Get Child By Symbol", "[node][search]")
 
     SECTION("Tree-based lookup using JSON grammar")
     {
-        ts::Language lang = tree_sitter_json();
-        ts::Parser   parser(lang);
-        std::string  code = R"({"key": 123})";
-        ts::Tree     tree = parser.parseString(code);
-        ts::Node     root = tree.getRootNode();
+        ts::Language     lang(tree_sitter_json());
+        ts::LanguageView view = lang;
+        ts::Parser       parser(lang);
+        std::string      code = R"({"key": 123})";
+        ts::Tree         tree = parser.parseString(code);
+        ts::Node         root = tree.getRootNode();
 
         // The root is 'document', its first named child is 'object'
         ts::Node object_node = root.getNamedChild(0);
@@ -562,7 +568,7 @@ TEST_CASE("Node Get Child By Symbol", "[node][search]")
 
         SECTION("Successfully finds a Named Node (AST element)")
         {
-            ts::Symbol pair_symbol = lang.getSymbolForName("pair", true);
+            ts::Symbol pair_symbol = view.getSymbolForName("pair", true);
             REQUIRE(pair_symbol != 0);
 
             ts::Node pair_node = object_node.getChildBySymbol(pair_symbol);
@@ -573,7 +579,7 @@ TEST_CASE("Node Get Child By Symbol", "[node][search]")
 
         SECTION("Successfully finds an Anonymous Node / Punctuation (CST element)")
         {
-            ts::Symbol brace_symbol = lang.getSymbolForName("{", false);
+            ts::Symbol brace_symbol = view.getSymbolForName("{", false);
             REQUIRE(brace_symbol != 0);
 
             ts::Node brace_node = object_node.getChildBySymbol(brace_symbol);
@@ -584,7 +590,7 @@ TEST_CASE("Node Get Child By Symbol", "[node][search]")
 
         SECTION("Returns null() for a valid grammar symbol that doesn't exist as a child")
         {
-            ts::Symbol array_symbol = lang.getSymbolForName("array", true);
+            ts::Symbol array_symbol = view.getSymbolForName("array", true);
             REQUIRE(array_symbol != 0);
 
             ts::Node missing_node = object_node.getChildBySymbol(array_symbol);
@@ -610,18 +616,18 @@ TEST_CASE("Node Get Named Child By Type", "[node][search]")
 #if SIZE_MAX > UINT32_MAX
     SECTION("Throws std::length_error when input name exceeds 4GB limit")
     {
-        ts::Node                         node          = ts::Node::null();
-        const char                      *fake_str      = "fake";
-        constexpr size_t                 overflow_size = static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1;
-        ts::details::StringViewParameter huge_view(fake_str, overflow_size);
+        ts::Node              node          = ts::Node::null();
+        const char           *fake_str      = "fake";
+        constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+        const ts::StringView  huge_view(fake_str, overflow_size);
 
         CHECK_THROWS_AS(node.getNamedChildByType(huge_view), std::length_error);
     }
-#endif
+#endif // SIZE_MAX > UINT32_MAX
 
     SECTION("Tree-based strict AST lookup using JSON grammar")
     {
-        ts::Language lang = tree_sitter_json();
+        ts::Language lang(tree_sitter_json());
         ts::Parser   parser(lang);
         std::string  code = R"({"key": 123})";
         ts::Tree     tree = parser.parseString(code);
@@ -657,18 +663,19 @@ TEST_CASE("Node Get Named Child By Symbol", "[node][search]")
 
     SECTION("Tree-based strict AST lookup using JSON grammar")
     {
-        ts::Language lang = tree_sitter_json();
-        ts::Parser   parser(lang);
-        std::string  code = R"({"key": 123})";
-        ts::Tree     tree = parser.parseString(code);
-        ts::Node     root = tree.getRootNode();
+        ts::Language     lang(tree_sitter_json());
+        ts::LanguageView view = lang;
+        ts::Parser       parser(lang);
+        std::string      code = R"({"key": 123})";
+        ts::Tree         tree = parser.parseString(code);
+        ts::Node         root = tree.getRootNode();
 
         ts::Node object_node = root.getNamedChild(0);
         REQUIRE_FALSE(object_node.isNull());
 
         SECTION("Successfully finds a Named Node")
         {
-            ts::Symbol pair_symbol = lang.getSymbolForName("pair", true);
+            ts::Symbol pair_symbol = view.getSymbolForName("pair", true);
             REQUIRE(pair_symbol != 0);
 
             ts::Node pair_node = object_node.getNamedChildBySymbol(pair_symbol);
@@ -679,7 +686,7 @@ TEST_CASE("Node Get Named Child By Symbol", "[node][search]")
 
         SECTION("Returns null() and ignores Anonymous Nodes (punctuation)")
         {
-            ts::Symbol brace_symbol = lang.getSymbolForName("{", false);
+            ts::Symbol brace_symbol = view.getSymbolForName("{", false);
             REQUIRE(brace_symbol != 0);
 
             // getNamedChildBySymbol iterates only over named children,

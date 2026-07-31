@@ -9,7 +9,7 @@ include(grammar)
 
 project(
     cpp-tree-sitter
-    VERSION 0.26.9
+    VERSION 0.26.11
     LANGUAGES C CXX
     DESCRIPTION "Simple C++ and CMake wrapper around tree-sitter."
 )
@@ -20,13 +20,28 @@ option(CPP_TS_FEATURE_WASM "Enable the Wasm feature" OFF)
 option(CPP_TS_AMALGAMATED "Build using an amalgamated source" ON)
 option(CPP_TS_MSVC_STATIC_RUNTIME "Use static MSVC runtime (/MT or /MTd)" OFF)
 
+# CXX VERSION
+# Note: The C++ standard defined here applies exclusively to the compiled library 
+# and the tests. The second library target, cpp-tree-sitter-header-only (INTERFACE), 
+# does not enforce any specific standard. Instead, it seamlessly adapts to the 
+# C++ standard of the consuming/parent project.
+if(DEFINED CPP_TS_CXX_STANDARD AND NOT CACHE{CPP_TS_CXX_STANDARD})
+	set(CPP_TS_CXX_STANDARD "${CPP_TS_CXX_STANDARD}" CACHE STRING "C++ standard to use for cpp-tree-sitter (11, 14, 17, 20, 23)" FORCE)
+endif()
+
+if(NOT CPP_TS_CXX_STANDARD)
+	set(CPP_TS_CXX_STANDARD 20 CACHE STRING "C++ standard to use for cpp-tree-sitter (11, 14, 17, 20, 23)")
+endif()
+
+set_property(CACHE CPP_TS_CXX_STANDARD PROPERTY STRINGS "11" "14" "17" "20" "23")
+
 # WASMTIME VERSION
 if(DEFINED CPP_TS_WASMTIME_VERSION AND NOT CACHE{CPP_TS_WASMTIME_VERSION})
-	set(CPP_TS_WASMTIME_VERSION "${CPP_TS_WASMTIME_VERSION}" CACHE PATH "Version of Wasmtime to be fetched from remote" FORCE)
+	set(CPP_TS_WASMTIME_VERSION "${CPP_TS_WASMTIME_VERSION}" CACHE STRING "Version of Wasmtime to be fetched from remote" FORCE)
 endif()
 
 if(NOT CPP_TS_WASMTIME_VERSION)
-	set(CPP_TS_WASMTIME_VERSION "${CPP_TS_WASMTIME_DEFAULT_VERSION}" CACHE PATH "Version of Wasmtime to be fetched from remote")
+	set(CPP_TS_WASMTIME_VERSION "${CPP_TS_WASMTIME_DEFAULT_VERSION}" CACHE STRING "Version of Wasmtime to be fetched from remote")
 endif()
 
 # WASMTIME PATH
@@ -43,6 +58,7 @@ cpp_ts_print_config_option(CPP_TS_BUILD_TESTS)
 cpp_ts_print_config_option(CPP_TS_FEATURE_WASM)
 cpp_ts_print_config_option(CPP_TS_AMALGAMATED)
 cpp_ts_print_config_option(CPP_TS_MSVC_STATIC_RUNTIME)
+cpp_ts_print_config_option(CPP_TS_CXX_STANDARD)
 cpp_ts_print_config_option(CPP_TS_WASMTIME_VERSION)
 cpp_ts_print_config_option(CPP_TS_WASMTIME_PATH)
 message(STATUS "===================================================")
@@ -106,16 +122,41 @@ if(tree-sitter_ADDED)
 		target_compile_definitions(tree-sitter PRIVATE NOMINMAX)
 	endif()
 
+	if(MINGW)
+		target_link_options(tree-sitter PRIVATE -Wl,--allow-multiple-definition)
+	endif()
+
 	target_compile_definitions(tree-sitter PRIVATE _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE _BSD_SOURCE _DARWIN_C_SOURCE)
 endif()
 
-add_library(${PROJECT_NAME} INTERFACE)
-target_include_directories(${PROJECT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
-target_link_libraries(${PROJECT_NAME} INTERFACE tree-sitter)
-target_compile_options(${PROJECT_NAME} INTERFACE ${CPP_TS_NECESSARY_COMPILE_OPTIONS})
+add_library(${PROJECT_NAME})
+add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+target_sources(${PROJECT_NAME} PRIVATE src/cpp-tree-sitter.cpp)
+target_include_directories(${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
+target_link_libraries(${PROJECT_NAME} PUBLIC tree-sitter)
+target_compile_options(${PROJECT_NAME} PRIVATE ${CPP_TS_NECESSARY_COMPILE_OPTIONS})
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_${CPP_TS_CXX_STANDARD})
+target_compile_definitions(${PROJECT_NAME} PUBLIC CPP_TS_CXX_STANDARD=${CPP_TS_CXX_STANDARD})
+set_target_properties(${PROJECT_NAME} PROPERTIES 
+	LINKER_LANGUAGE CXX
+    CXX_STANDARD_REQUIRED ON
+	POSITION_INDEPENDENT_CODE ON
+)
+
+add_library(${PROJECT_NAME}-header-only INTERFACE)
+add_library(${PROJECT_NAME}::header-only ALIAS ${PROJECT_NAME}-header-only)
+target_include_directories(${PROJECT_NAME}-header-only INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
+target_link_libraries(${PROJECT_NAME}-header-only INTERFACE tree-sitter)
+target_compile_options(${PROJECT_NAME}-header-only INTERFACE ${CPP_TS_NECESSARY_COMPILE_OPTIONS})
+target_compile_definitions(${PROJECT_NAME}-header-only INTERFACE CPP_TS_HEADER_ONLY)
 
 if(MSVC)
-	target_compile_definitions(${PROJECT_NAME} INTERFACE NOMINMAX)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
+	target_compile_definitions(${PROJECT_NAME}-header-only INTERFACE NOMINMAX)
+
+	set_target_properties(${PROJECT_NAME} PROPERTIES 
+		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<BOOL:${CPP_TS_MSVC_STATIC_RUNTIME}>>:DLL>"
+	)
 endif()
 
 if(CPP_TS_FEATURE_WASM)
@@ -134,7 +175,15 @@ if(CPP_TS_FEATURE_WASM)
 		endif()
 
 		if(WIN32)
-			set(WASM_PLATFORM "windows")
+			if(MSVC)
+				set(WASM_PLATFORM "windows")
+			elseif(MINGW)
+				set(WASM_PLATFORM "mingw")
+			elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+				set(WASM_PLATFORM "windows")
+			else()
+				message(FATAL_ERROR "Unsupported Windows compiler")
+			endif()
 			set(WASM_ARCHIVE_EXT "zip")
 		elseif(APPLE)
 			set(WASM_PLATFORM "macos")
@@ -165,15 +214,15 @@ if(CPP_TS_FEATURE_WASM)
 
 	if(WASMTIME_INCLUDE_DIR AND WASMTIME_LIB_DIR)
 		set(WASMTIME_LIB_NAME wasmtime)
-		if(NOT BUILD_SHARED_LIBS)
-			if(WIN32)
+		if(NOT BUILD_SHARED_LIBS AND WIN32)
+			if(MSVC)
 				set(WASMTIME_LIB_NAME wasmtime.lib)
-				# Tree-Sitter
-				target_compile_definitions(tree-sitter PRIVATE WASM_API_EXTERN= WASI_API_EXTERN=)
-				target_link_libraries(tree-sitter INTERFACE ws2_32 advapi32 userenv ntdll shell32 ole32 bcrypt)
-			elseif(NOT APPLE)
-				# Tree-Sitter
-				target_link_libraries(tree-sitter INTERFACE pthread dl m)
+			elseif(MINGW)
+				set(WASMTIME_LIB_NAME libwasmtime.a)
+			elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+				set(WASMTIME_LIB_NAME wasmtime.lib)
+			else()
+				message(FATAL_ERROR "Unsupported Windows compiler")
 			endif()
 		endif()
 
@@ -186,13 +235,31 @@ if(CPP_TS_FEATURE_WASM)
 		)
 
 		# Project
-		target_include_directories(${PROJECT_NAME} INTERFACE ${WASMTIME_INCLUDE_DIR})
-		target_compile_definitions(${PROJECT_NAME} INTERFACE CPP_TS_FEATURE_WASM)
+		target_include_directories(${PROJECT_NAME} PUBLIC ${WASMTIME_INCLUDE_DIR})
+		target_compile_definitions(${PROJECT_NAME} PUBLIC CPP_TS_FEATURE_WASM)
+
+		target_include_directories(${PROJECT_NAME}-header-only INTERFACE ${WASMTIME_INCLUDE_DIR})
+		target_compile_definitions(${PROJECT_NAME}-header-only INTERFACE CPP_TS_FEATURE_WASM)
 
 		# Tree-Sitter
 		target_include_directories(tree-sitter PRIVATE ${WASMTIME_INCLUDE_DIR})
 		target_compile_definitions(tree-sitter PUBLIC TREE_SITTER_FEATURE_WASM)
 		target_link_libraries(tree-sitter PUBLIC ${WASMTIME_LIBRARY})
+
+		if(NOT BUILD_SHARED_LIBS)
+			if(WIN32)
+				# Tree-Sitter
+				target_compile_definitions(tree-sitter PRIVATE WASM_API_EXTERN= WASI_API_EXTERN=)
+				target_link_libraries(tree-sitter INTERFACE ws2_32 advapi32 userenv ntdll shell32 ole32 bcrypt)
+
+				if(MINGW)
+                    target_link_options(tree-sitter INTERFACE "-Wl,--defsym,__intrinsic_setjmpex=_setjmp")
+                endif()
+			elseif(NOT APPLE)
+				# Tree-Sitter
+				target_link_libraries(tree-sitter INTERFACE pthread dl m)
+			endif()
+		endif()
 	endif()
 
 	function(CPPTSCopyWasmtime)

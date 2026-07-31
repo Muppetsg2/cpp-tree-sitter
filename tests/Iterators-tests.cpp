@@ -8,7 +8,6 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 // STL
-#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -18,7 +17,7 @@ extern "C" const TSLanguage *tree_sitter_json();
 
 TEST_CASE("Lookahead Iterator", "[language][lookahead]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Tree     tree = ts::Parser(lang).parseString("{\"a\": 1}");
     ts::Node     root = tree.getRootNode();
 
@@ -32,6 +31,7 @@ TEST_CASE("Lookahead Iterator", "[language][lookahead]")
         if (it.getCurrentSymbolName().size() > 0)
         {
             found_value_symbols = true;
+            break;
         }
     }
     CHECK(found_value_symbols);
@@ -39,7 +39,7 @@ TEST_CASE("Lookahead Iterator", "[language][lookahead]")
 
 TEST_CASE("STL-like Iterators", "[iterators]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code       = "[10, 20, 30]";
     ts::Tree     tree       = parser.parseString(code);
@@ -50,7 +50,7 @@ TEST_CASE("STL-like Iterators", "[iterators]")
         std::vector<std::string> values;
         ts::Children             children{ array_node };
 
-        for (ts::Node child : children)
+        for (const ts::Node &child : children)
         {
             if (child.isNamed())
             {
@@ -66,7 +66,7 @@ TEST_CASE("STL-like Iterators", "[iterators]")
 
 TEST_CASE("ChildIterator Edge Cases and Operators", "[iterators]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     std::string  code = "123";
     ts::Tree     tree = parser.parseString(code);
@@ -110,7 +110,7 @@ TEST_CASE("ChildIterator Edge Cases and Operators", "[iterators]")
 
 TEST_CASE("LookaheadIterator Exceptions and State Control", "[iterators][lookahead]")
 {
-    ts::Language lang = tree_sitter_json();
+    ts::Language lang(tree_sitter_json());
     ts::Parser   parser(lang);
     ts::Tree     tree        = parser.parseString("{}");
     ts::Node     root        = tree.getRootNode();
@@ -125,7 +125,7 @@ TEST_CASE("LookaheadIterator Exceptions and State Control", "[iterators][lookahe
     SECTION("Constructor throws on invalid state")
     {
         // Provide an absurdly high state ID that doesn't exist in the grammar
-        constexpr ts::StateID invalid_state = std::numeric_limits<uint16_t>::max();
+        constexpr ts::StateID invalid_state = std::numeric_limits<ts::StateID>::max();
         CHECK_THROWS_AS(ts::LookaheadIterator(lang, invalid_state), std::runtime_error);
     }
 
