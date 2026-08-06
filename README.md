@@ -2,7 +2,7 @@
 
 `cpp-tree-sitter` is a modern, lightweight **C++11 (and newer)** wrapper around the [tree-sitter](https://github.com/tree-sitter/tree-sitter/) parsing library. 
 It provides a clean, RAII-compliant interface and robust CMake integration to simplify working with syntax trees in C++ projects.
-> **Note on this Fork:** This project is a significant evolution of the original repository by Nick Sumner. It supports legacy C++ standards (back to C++11), full Query/Wasm support, and advanced tree traversal utilities.
+> **Note on this Fork:** This project is a significant evolution of the [original repository by Nick Sumner](https://github.com/nsumner/cpp-tree-sitter). It supports legacy C++ standards (back to C++11), full Query/Wasm support, and advanced tree traversal utilities.
 
 ## Key Features
 * **Modern RAII API:** Automatic memory management for `Parsers`, `Trees`, `Nodes`, and `Cursors` using standard smart pointers.

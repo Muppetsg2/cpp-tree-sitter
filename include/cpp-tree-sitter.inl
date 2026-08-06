@@ -168,6 +168,10 @@ namespace ts
         byte.end    = raw_range.end_byte;
     }
 
+    /////////////////////////////////////////////////////////////////////////////
+    // Input
+    /////////////////////////////////////////////////////////////////////////////
+
 #if CPP_TS_HAS_CXX17
     CPP_TS_API thread_local const Input *Input::current_input_ptr = nullptr;
 #endif // CPP_TS_HAS_CXX17
@@ -189,7 +193,7 @@ namespace ts
         impl_->read    = read_proxy;
     }
 
-    CPP_TS_API Input::Input(ReadFunction read, ts::DecodeFunction decode)
+    CPP_TS_API Input::Input(ReadFunction read, DecodeFunction decode)
         : read_(read ? std::move(read) : nullptr)
         , decode_(decode ? std::move(decode) : nullptr)
         , encoding_(decode ? InputEncoding::Custom : InputEncoding::UTF8)
@@ -209,37 +213,6 @@ namespace ts
         {
             impl_->payload = this;
         }
-    }
-
-    CPP_TS_API const char *Input::read_proxy(void          *payload,
-                                             std::uint32_t  byte_index,
-                                             TSPoint        position,
-                                             std::uint32_t *bytes_read)
-    {
-        auto *self = static_cast<Input *>(payload);
-        if (self && self->read_)
-        {
-            details::StringViewReturn result = self->read_(byte_index, position, bytes_read);
-            return result.data();
-        }
-        *bytes_read = 0;
-        return nullptr;
-    }
-
-    CPP_TS_API std::uint32_t Input::decode_proxy(const std::uint8_t *string,
-                                                 std::uint32_t       length,
-                                                 std::int32_t       *code_point) noexcept
-    {
-#if CPP_TS_HAS_CXX17
-        const Input *ptr = current_input_ptr;
-#else
-        const Input *ptr = current_ptr();
-#endif
-        if (ptr && ptr->decode_)
-        {
-            return ptr->decode_({ string, length }, code_point);
-        }
-        return 0;
     }
 
     CPP_TS_API Input &Input::operator=(Input &&other) noexcept
@@ -273,6 +246,37 @@ namespace ts
         impl_->encoding = static_cast<TSInputEncoding>(encoding_);
         impl_->decode   = decode_ ? decode_proxy : nullptr;
         return impl_.get();
+    }
+
+    CPP_TS_API const char *Input::read_proxy(void          *payload,
+                                             std::uint32_t  byte_index,
+                                             TSPoint        position,
+                                             std::uint32_t *bytes_read)
+    {
+        auto *self = static_cast<Input *>(payload);
+        if (self && self->read_)
+        {
+            details::StringViewReturn result = self->read_(byte_index, position, bytes_read);
+            return result.data();
+        }
+        *bytes_read = 0;
+        return nullptr;
+    }
+
+    CPP_TS_API std::uint32_t Input::decode_proxy(const std::uint8_t *string,
+                                                 std::uint32_t       length,
+                                                 std::int32_t       *code_point) noexcept
+    {
+#if CPP_TS_HAS_CXX17
+        const Input *ptr = current_input_ptr;
+#else
+        const Input *ptr = current_ptr();
+#endif
+        if (ptr && ptr->decode_)
+        {
+            return ptr->decode_({ string, length }, code_point);
+        }
+        return 0;
     }
 
     /////////////////////////////////////////////////////////////////////////////
@@ -624,9 +628,38 @@ namespace ts
         }
     }
 
+    CPP_TS_API Tree &Tree::operator=(const Tree &other)
+    {
+        if (this != &other)
+        {
+            is_valid_ = other.is_valid_;
+            if (is_valid_ && other.impl_.get() != nullptr)
+            {
+                impl_.reset(ts_tree_copy(other.impl_.get()));
+            }
+            else
+            {
+                is_valid_ = false;
+                impl_.reset();
+            }
+        }
+        return *this;
+    }
+
     CPP_TS_API Tree::Tree(Tree &&other) noexcept : impl_{ std::move(other.impl_) }, is_valid_{ other.is_valid_ }
     {
         other.is_valid_ = false;
+    }
+
+    CPP_TS_API Tree &Tree::operator=(Tree &&other) noexcept
+    {
+        if (this != &other)
+        {
+            impl_           = std::move(other.impl_);
+            is_valid_       = other.is_valid_;
+            other.is_valid_ = false;
+        }
+        return *this;
     }
 
     CPP_TS_API void Tree::edit(const InputEdit &edit)
@@ -729,35 +762,6 @@ namespace ts
         }
     }
 
-    CPP_TS_API Tree &Tree::operator=(const Tree &other)
-    {
-        if (this != &other)
-        {
-            is_valid_ = other.is_valid_;
-            if (is_valid_ && other.impl_.get() != nullptr)
-            {
-                impl_.reset(ts_tree_copy(other.impl_.get()));
-            }
-            else
-            {
-                is_valid_ = false;
-                impl_.reset();
-            }
-        }
-        return *this;
-    }
-
-    CPP_TS_API Tree &Tree::operator=(Tree &&other) noexcept
-    {
-        if (this != &other)
-        {
-            impl_           = std::move(other.impl_);
-            is_valid_       = other.is_valid_;
-            other.is_valid_ = false;
-        }
-        return *this;
-    }
-
     /////////////////////////////////////////////////////////////////////////////
     // Parser
     /////////////////////////////////////////////////////////////////////////////
@@ -824,6 +828,32 @@ namespace ts
         {
             setLogger(current_logger_);
         }
+    }
+
+    CPP_TS_API Parser &Parser::operator=(Parser &&other) noexcept
+    {
+        if (this != &other)
+        {
+            impl_           = std::move(other.impl_);
+            current_logger_ = std::move(other.current_logger_);
+            language_set_   = other.language_set_;
+
+            other.language_set_ = false;
+
+#if defined(CPP_TS_FEATURE_WASM)
+            wasm_store_set_       = other.wasm_store_set_;
+            other.wasm_store_set_ = false;
+#endif
+            if (current_logger_)
+            {
+                setLogger(current_logger_);
+            }
+            else
+            {
+                removeLogger();
+            }
+        }
+        return *this;
     }
 
 #if CPP_TS_HAS_CXX23
@@ -1121,32 +1151,6 @@ namespace ts
         ts_parser_set_logger(impl_.get(), ts_logger);
     }
 
-    CPP_TS_API Parser &Parser::operator=(Parser &&other) noexcept
-    {
-        if (this != &other)
-        {
-            impl_           = std::move(other.impl_);
-            current_logger_ = std::move(other.current_logger_);
-            language_set_   = other.language_set_;
-
-            other.language_set_ = false;
-
-#if defined(CPP_TS_FEATURE_WASM)
-            wasm_store_set_       = other.wasm_store_set_;
-            other.wasm_store_set_ = false;
-#endif
-            if (current_logger_)
-            {
-                setLogger(current_logger_);
-            }
-            else
-            {
-                removeLogger();
-            }
-        }
-        return *this;
-    }
-
     /////////////////////////////////////////////////////////////////////////////
     // TreeCursor
     /////////////////////////////////////////////////////////////////////////////
@@ -1345,6 +1349,17 @@ namespace ts
         other.is_valid_ = false;
     }
 
+    CPP_TS_API WasmStore &WasmStore::operator=(WasmStore &&other) noexcept
+    {
+        if (this != &other)
+        {
+            impl_           = std::move(other.impl_);
+            is_valid_       = other.is_valid_;
+            other.is_valid_ = false;
+        }
+        return *this;
+    }
+
 #if CPP_TS_HAS_CXX23
     CPP_TS_API std::expected<WasmStore, std::string> WasmStore::create(WasmEngine *engine) noexcept
     {
@@ -1511,17 +1526,6 @@ namespace ts
         }
 
         return ts_wasm_store_language_count(impl_.get());
-    }
-
-    CPP_TS_API WasmStore &WasmStore::operator=(WasmStore &&other) noexcept
-    {
-        if (this != &other)
-        {
-            impl_           = std::move(other.impl_);
-            is_valid_       = other.is_valid_;
-            other.is_valid_ = false;
-        }
-        return *this;
     }
 #endif // defined(CPP_TS_FEATURE_WASM)
 
