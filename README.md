@@ -165,7 +165,7 @@ The library now features a custom `StringView` for C++11/14 environments and det
 |  **Benchmarks**  |        No        |                  Yes                  |
 
 ## Benchmarks
-Does the RAII wrapper actually cost you anything at runtime compared to using the raw tree-sitter C API? Short answer: **no** — across parsing, tree traversal (cursor and `ts::visit`), query matching, incremental reparse, and tree copying, the wrapper's overhead is within a few percent of raw C API, and on several operations it's measured as fast or faster.
+Does the RAII wrapper actually cost you anything at runtime compared to using the raw tree-sitter C API? Short answer: **no** - across parsing, tree traversal (cursor and `ts::visit`), query matching, incremental reparse, and tree copying, the wrapper's overhead is within a few percent of raw C API, and on several operations it's measured as fast or faster.
 
 |           Category           | Wrapper overhead (median) |
 |:-----------------------------|:--------------------------|
@@ -174,7 +174,7 @@ Does the RAII wrapper actually cost you anything at runtime compared to using th
 | Tree traversal (`ts::visit`) |     +1.26 % to +2.06 %    |
 |        Query matching        |     +3.28 % to +3.32 %    |
 |     Incremental reparse      |     -1.36 % to +0.71 %    |
-|          Tree copy           |          ±0.00 %          |
+|          Tree copy           |          Â±0.00 %          |
 
 Full methodology, per-scenario numbers, and instructions for reproducing (and extending to C++11/14, C++17, C++20, C++23) live in [`BENCHMARKS.md`](docs/BENCHMARKS.md).
 
