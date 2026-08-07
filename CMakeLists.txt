@@ -16,13 +16,14 @@ project(
 
 # OPTIONS
 option(CPP_TS_BUILD_TESTS "Build test for cpp-tree-sitter" ${PROJECT_IS_TOP_LEVEL})
+option(CPP_TS_BUILD_BENCHMARK "Build benchmark for cpp-tree-sitter" ${PROJECT_IS_TOP_LEVEL})
 option(CPP_TS_FEATURE_WASM "Enable the Wasm feature" OFF)
 option(CPP_TS_AMALGAMATED "Build using an amalgamated source" ON)
 option(CPP_TS_MSVC_STATIC_RUNTIME "Use static MSVC runtime (/MT or /MTd)" OFF)
 
 # CXX VERSION
-# Note: The C++ standard defined here applies exclusively to the compiled library 
-# and the tests. The second library target, cpp-tree-sitter-header-only (INTERFACE), 
+# Note: The C++ standard defined here applies exclusively to the compiled library the tests and benchmarks.
+# The second library target, cpp-tree-sitter-header-only (INTERFACE), 
 # does not enforce any specific standard. Instead, it seamlessly adapts to the 
 # C++ standard of the consuming/parent project.
 if(DEFINED CPP_TS_CXX_STANDARD AND NOT CACHE{CPP_TS_CXX_STANDARD})
@@ -30,7 +31,7 @@ if(DEFINED CPP_TS_CXX_STANDARD AND NOT CACHE{CPP_TS_CXX_STANDARD})
 endif()
 
 if(NOT CPP_TS_CXX_STANDARD)
-	set(CPP_TS_CXX_STANDARD 20 CACHE STRING "C++ standard to use for cpp-tree-sitter (11, 14, 17, 20, 23)")
+	set(CPP_TS_CXX_STANDARD 20 CACHE STRING "C++ standard to use for cpp-tree-sitter (11, 14, 17, 20, 23)" FORCE)
 endif()
 
 set_property(CACHE CPP_TS_CXX_STANDARD PROPERTY STRINGS "11" "14" "17" "20" "23")
@@ -41,7 +42,7 @@ if(DEFINED CPP_TS_WASMTIME_VERSION AND NOT CACHE{CPP_TS_WASMTIME_VERSION})
 endif()
 
 if(NOT CPP_TS_WASMTIME_VERSION)
-	set(CPP_TS_WASMTIME_VERSION "${CPP_TS_WASMTIME_DEFAULT_VERSION}" CACHE STRING "Version of Wasmtime to be fetched from remote")
+	set(CPP_TS_WASMTIME_VERSION "${CPP_TS_WASMTIME_DEFAULT_VERSION}" CACHE STRING "Version of Wasmtime to be fetched from remote" FORCE)
 endif()
 
 # WASMTIME PATH
@@ -50,11 +51,12 @@ if(DEFINED CPP_TS_WASMTIME_PATH AND NOT CACHE{CPP_TS_WASMTIME_PATH})
 endif()
 
 if(NOT CPP_TS_WASMTIME_PATH)
-	set(CPP_TS_WASMTIME_PATH "" CACHE PATH "Path to locally installed wasmtime")
+	set(CPP_TS_WASMTIME_PATH "" CACHE PATH "Path to locally installed wasmtime" FORCE)
 endif()
 
 message(STATUS "========== cpp-tree-sitter configuration ==========")
 cpp_ts_print_config_option(CPP_TS_BUILD_TESTS)
+cpp_ts_print_config_option(CPP_TS_BUILD_BENCHMARK)
 cpp_ts_print_config_option(CPP_TS_FEATURE_WASM)
 cpp_ts_print_config_option(CPP_TS_AMALGAMATED)
 cpp_ts_print_config_option(CPP_TS_MSVC_STATIC_RUNTIME)
@@ -289,4 +291,8 @@ if(CPP_TS_BUILD_TESTS)
 	include(CTest)
 	enable_testing()
 	add_subdirectory(tests)
+endif()
+
+if(CPP_TS_BUILD_BENCHMARK)
+	add_subdirectory(benchmark)
 endif()

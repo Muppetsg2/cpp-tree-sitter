@@ -63,6 +63,7 @@ You can set these options using `-DOPTION=VALUE` during the CMake configuration 
 |             Option            |      Default      |                                  Description                                   |
 |:------------------------------|:-----------------:|:-------------------------------------------------------------------------------|
 |     `CPP_TS_BUILD_TESTS`      | ON (if top-level) |                       Build unit tests for the library.                        |
+|    `CPP_TS_BUILD_BENCHMARK`   | ON (if top-level) |                       Build benchmark for the library.                         |
 |     `CPP_TS_FEATURE_WASM`     |        OFF        |               Enable WebAssembly support (requires `wasmtime`).                |
 |     `CPP_TS_AMALGAMATED`      |        ON         | Build `tree-sitter` core using the amalgamated `lib.c` for faster compilation. |
 | `CPP_TS_MSVC_STATIC_RUNTIME`  |        OFF        |                    Link static MSVC runtime (/MT or /MTd).                     |
@@ -161,7 +162,29 @@ The library now features a custom `StringView` for C++11/14 environments and det
 | **Wasm Support** |        No        |                  Yes                  |
 |  **RAII Scope**  |      Partial     |  Complete (Tree, Parser, Query, etc.) |
 |  **Unit Tests**  |        No        |                  Yes                  |
+|  **Benchmarks**  |        No        |                  Yes                  |
 
+## Benchmarks
+Does the RAII wrapper actually cost you anything at runtime compared to using the raw tree-sitter C API? Short answer: **no** — across parsing, tree traversal (cursor and `ts::visit`), query matching, incremental reparse, and tree copying, the wrapper's overhead is within a few percent of raw C API, and on several operations it's measured as fast or faster.
+
+|           Category           | Wrapper overhead (median) |
+|:-----------------------------|:--------------------------|
+|           Parsing            |     -7.87 % to +0.57 %    |
+|   Tree traversal (cursor)    |     +0.13 % to +1.21 %    |
+| Tree traversal (`ts::visit`) |     +1.26 % to +2.06 %    |
+|        Query matching        |     +3.28 % to +3.32 %    |
+|     Incremental reparse      |     -1.36 % to +0.71 %    |
+|          Tree copy           |          ±0.00 %          |
+
+Full methodology, per-scenario numbers, and instructions for reproducing (and extending to C++11/14, C++17, C++20, C++23) live in [`BENCHMARKS.md`](docs/BENCHMARKS.md).
+
+To build and run the benchmark suite yourself:
+
+```bash
+cmake -B build -DCPP_TS_BUILD_BENCHMARK=ON
+cmake --build build --config Release
+./build/benchmark/cpp-tree-sitter-benchmark
+```
 
 ## License
 This project is licensed under the [**MIT License**](LICENSE).\

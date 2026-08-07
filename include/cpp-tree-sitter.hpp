@@ -4840,9 +4840,7 @@ namespace ts
             return;
         }
 
-        TreeCursor          cursor      = root.getCursor();
-        const std::uint32_t start_depth = cursor.getDepthFromOrigin();
-
+        TreeCursor cursor = root.getCursor();
         while (true)
         {
             if (callback(cursor.getCurrentNode()))
@@ -4864,18 +4862,15 @@ namespace ts
 
             // 3. If no child and neighbours go up if you find next neighbours but not before `root`
             bool found_next = false;
-            while (cursor.getDepthFromOrigin() > start_depth)
+            while (true)
             {
-                if (cursor.gotoParent())
+                if (!cursor.gotoParent())
                 {
-                    if (cursor.gotoNextSibling())
-                    {
-                        found_next = true;
-                        break;
-                    }
+                    break;
                 }
-                else
+                else if (cursor.gotoNextSibling())
                 {
+                    found_next = true;
                     break;
                 }
             }
