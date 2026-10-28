@@ -19,6 +19,7 @@
         "CMAKE_C_EXTENSIONS": false,
         "BUILD_SHARED_LIBS": false,
         "CMAKE_DISABLE_SOURCE_CHANGES": true,
+        "CPM_SOURCE_CACHE": "${sourceDir}/out/cpm_cache",
         "CPP_TS_BUILD_TESTS": true
       }
     },

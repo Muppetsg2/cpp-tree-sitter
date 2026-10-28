@@ -9,6 +9,7 @@
 #include <cpp-tree-sitter.hpp>
 
 // STL
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <iomanip>
@@ -18,15 +19,9 @@
 #include <string>
 #include <vector>
 
-#if defined(_MSVC_LANG)
-#define CPP_TS_BENCHMARK_CXX_LEVEL _MSVC_LANG
-#else
-#define CPP_TS_BENCHMARK_CXX_LEVEL __cplusplus
-#endif // defined(_MSVC_LANG)
-
-#define CPP_TS_BENCHMARK_HAS_CXX17 (CPP_TS_BENCHMARK_CXX_LEVEL >= 201703L)
-#define CPP_TS_BENCHMARK_HAS_CXX20 (CPP_TS_BENCHMARK_CXX_LEVEL >= 202002L)
-#define CPP_TS_BENCHMARK_HAS_CXX23 (CPP_TS_BENCHMARK_CXX_LEVEL >= 202302L)
+#define CPP_TS_BENCHMARK_HAS_CXX17 CPP_TS_HAS_CXX17
+#define CPP_TS_BENCHMARK_HAS_CXX20 CPP_TS_HAS_RANGES   // std::ranges algorithms
+#define CPP_TS_BENCHMARK_HAS_CXX23 CPP_TS_HAS_EXPECTED // std::expected based API
 
 #if defined(CPP_TS_BENCHMARK_FEATURE_WASM)
 #define CPP_TS_BENCHMARK_WASMTIME_CXX_ENABLED \
@@ -44,12 +39,9 @@
 #include <ios>
 #endif // defined(CPP_TS_BENCHMARK_FEATURE_WASM)
 
-#if CPP_TS_BENCHMARK_HAS_CXX20
-#include <algorithm>
-#endif // CPP_TS_BENCHMARK_HAS_CXX20
-
 #if defined(_WIN32)
 #include <conio.h>
+#include <io.h>
 #else
 #include <termios.h>
 #include <unistd.h>

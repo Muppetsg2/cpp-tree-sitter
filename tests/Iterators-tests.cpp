@@ -1,170 +1,249 @@
-#include "pch.hpp"
+// Iterators: children ranges, ChildIterator operators, pre-order walk and lookahead iterator.
 
-// cpp-tree-sitter
-#include <cpp-tree-sitter.hpp>
-
-// Catch2
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "common.hpp"
 
 // STL
-#include <limits>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
-extern "C" const TSLanguage *tree_sitter_json();
+#if CPP_TS_HAS_RANGES
+#include <ranges>
+#endif // CPP_TS_HAS_RANGES
 
-TEST_CASE("Lookahead Iterator", "[language][lookahead]")
+namespace
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Tree     tree = ts::Parser(lang).parseString("{\"a\": 1}");
-    ts::Node     root = tree.getRootNode();
-
-    ts::StateID state = root.getNamedChild(0).getNamedChild(0).getNextParseState();
-
-    ts::LookaheadIterator it(lang, state);
-    bool                  found_value_symbols = false;
-
-    while (it.next())
+    std::string types(const ts::Children &children)
     {
-        if (it.getCurrentSymbolName().size() > 0)
+        std::string result;
+        for (ts::Node child : children)
         {
-            found_value_symbols = true;
-            break;
+            result += std::string(child.getType()) + " ";
         }
+        return result;
     }
-    CHECK(found_value_symbols);
+} // namespace
+
+TEST_CASE("Children range", "[iterators][children]")
+{
+    ts_test::JsonFixture json("[1, true, null]");
+
+    SECTION("All and named children")
+    {
+        const ts::Children all(json.value());
+        CHECK(types(all) == "[ number , true , null ] ");
+        CHECK(all.size() == 7u);
+        CHECK(all.size() == json.value().getChildCount());
+        CHECK_FALSE(all.empty());
+
+        const ts::Children named(json.value(), ts::ChildScope::NamedOnly);
+        CHECK(types(named) == "number true null ");
+        CHECK(named.size() == 3u);
+
+        CHECK(types(json.value().getChildren()) == "[ number , true , null ] ");
+        CHECK(types(json.value().getNamedChildren()) == "number true null ");
+
+        std::vector<std::string> texts;
+        for (ts::Node child : json.value().getNamedChildren())
+        {
+            texts.push_back(json.text(child));
+        }
+        REQUIRE(texts.size() == 3u);
+        CHECK(texts[0] == "1");
+        CHECK(texts[2] == "null");
+    }
+
+    SECTION("Nodes without children")
+    {
+        // Leaves and null nodes have no children: begin() equals end() in both directions.
+        const ts::Children leaf(json.value().getNamedChild(0));
+        CHECK(leaf.empty());
+        CHECK(leaf.begin() == leaf.end());
+        CHECK(leaf.end() == leaf.begin());
+        CHECK_FALSE(leaf.begin() != leaf.end());
+
+        CHECK(types(ts::Children(ts::Node::null())).empty());
+        CHECK(types(ts::Children()).empty());
+    }
+
+#if CPP_TS_HAS_RANGES
+    SECTION("Children views compose with std::views")
+    {
+        auto literals = json.value().getChildren() | std::views::filter([](ts::Node n) { return n.isNamed(); })
+                      | std::views::transform([](ts::Node n) { return n.getType(); });
+        std::vector<std::string_view> found;
+        for (std::string_view type : literals)
+        {
+            found.push_back(type);
+        }
+        CHECK(found == std::vector<std::string_view>{ "number", "true", "null" });
+    }
+#endif // CPP_TS_HAS_RANGES
 }
 
-TEST_CASE("STL-like Iterators", "[iterators]")
+TEST_CASE("ChildIterator operators", "[iterators][children]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code       = "[10, 20, 30]";
-    ts::Tree     tree       = parser.parseString(code);
-    ts::Node     array_node = tree.getRootNode().getNamedChild(0);
+    ts_test::JsonFixture json("[1, 2]");
+    const ts::Children   children(json.value());
 
-    SECTION("Iterating over named children")
+    ts::ChildIterator it = children.begin();
+    CHECK((*it).getType() == "[");
+    CHECK(it->getType() == "[");
+    CHECK(it.get() == json.value().getChild(0));
+
+    // Postfix increment and decrement return the previous node.
+    CHECK((*it++).getType() == "[");
+    CHECK(it->getType() == "number");
+    CHECK((*it--).getType() == "number");
+    CHECK(it->getType() == "[");
+
+    ++it;
+    ++it;
+    ++it;
+    ++it;
+    CHECK(it->getType() == "]");
+    ++it;
+    CHECK(it == children.end());
+    CHECK(children.end() == it);
+
+    // Decrementing the end iterator returns to the last child.
+    --it;
+    CHECK(it != children.end());
+    CHECK(it->getType() == "]");
+
+    // Iterators over the same node compare equal; moving keeps the position.
+    ts::ChildIterator first  = children.begin();
+    ts::ChildIterator second = children.begin();
+    CHECK(first == second);
+    ++second;
+    CHECK(first != second);
+    ts::ChildIterator moved(std::move(second));
+    CHECK(moved->getType() == "number");
+}
+
+TEST_CASE("Named ChildIterator skips anonymous children in both directions", "[iterators][children]")
+{
+    ts_test::JsonFixture json("[1, true, null]");
+
+    ts::ChildIterator it(json.value(), ts::ChildScope::NamedOnly);
+    CHECK(json.text(*it) == "1");
+    ++it;
+    CHECK(json.text(*it) == "true");
+    --it;
+    CHECK(json.text(*it) == "1");
+}
+
+TEST_CASE("Pre-order walk", "[iterators][preorder]")
+{
+    ts_test::JsonFixture json("[{\"a\": 1}, 2]");
+
+    SECTION("Walks every node in document order")
     {
-        std::vector<std::string> values;
-        ts::Children             children{ array_node };
-
-        for (const ts::Node &child : children)
+        std::vector<std::string> walked;
+        for (ts::Node node : ts::preorder(json.root()))
         {
-            if (child.isNamed())
+            walked.push_back(std::string(node.getType()));
+        }
+        CHECK(walked.size() == json.root().getDescendantsCount());
+        CHECK(walked.front() == "document");
+        CHECK(walked[1] == "array");
+        CHECK(walked.back() == "]");
+    }
+
+    SECTION("Stays inside the subtree of the start node")
+    {
+        std::uint32_t inside_object = 0;
+        for (ts::Node node : ts::preorder(json.value().getNamedChild(0)))
+        {
+            static_cast<void>(node);
+            ++inside_object;
+        }
+        CHECK(inside_object == json.value().getNamedChild(0).getDescendantsCount());
+    }
+
+    SECTION("Null root")
+    {
+        std::uint32_t null_walk = 0;
+        for (ts::Node node : ts::preorder(ts::Node::null()))
+        {
+            static_cast<void>(node);
+            ++null_walk;
+        }
+        CHECK(null_walk == 0u);
+    }
+
+    SECTION("Skips children and reports the depth")
+    {
+        std::string            walked;
+        std::uint32_t          deepest = 0;
+        const ts::PreorderView view    = ts::preorder(json.root());
+        for (ts::PreorderIterator it = view.begin(); it != view.end(); ++it)
+        {
+            walked += std::string((*it).getType()) + " ";
+            deepest = it.depth() > deepest ? it.depth() : deepest;
+            if ((*it).getType() == "object")
             {
-                values.push_back(child.getSourceText(code));
+                it.skipChildren();
             }
         }
-
-        REQUIRE(values.size() == 3);
-        CHECK(values[0] == "10");
-        CHECK(values[2] == "30");
+        CHECK(walked == "document array [ object , number ] ");
+        CHECK(deepest == 2u);
     }
 }
 
-TEST_CASE("ChildIterator Edge Cases and Operators", "[iterators]")
+TEST_CASE("Lookahead iterator", "[iterators][lookahead]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "123";
-    ts::Tree     tree = parser.parseString(code);
+    ts_test::JsonFixture json("[1]");
+    const ts::StateID    state = json.value().getChild(0).getParseState();
 
-    // The root node (document) has one child (number), and the number has 0 children
-    ts::Node document = tree.getRootNode();
-    ts::Node number   = document.getNamedChild(0);
-
-    SECTION("Iteration over a node with no children")
+    SECTION("Iteration, exhaustion and reset")
     {
-        ts::Children children{ number };
-        auto         it  = children.begin();
-        auto         end = children.end();
+        ts::LookaheadIterator iterator = json.language.getView().getLookaheadIterator(state);
+        CHECK(static_cast<const TSLanguage *>(iterator.getLanguage())
+              == static_cast<const TSLanguage *>(json.language));
+        CHECK(static_cast<const TSLookaheadIterator *>(iterator) != nullptr);
 
-        // Should immediately be equal to the sentinel
-        CHECK(it == end);
-        CHECK(end == it);
-        CHECK_FALSE(it != end);
-        CHECK_FALSE(end != it);
-    }
+        // A new iterator is not positioned on a symbol until next() is called.
+        CHECK(iterator.getCurrentSymbolName().empty());
 
-    SECTION("Pre-increment vs Post-increment")
-    {
-        std::string arr_code   = "[1, 2]";
-        ts::Tree    arr_tree   = parser.parseString(arr_code);
-        ts::Node    array_node = arr_tree.getRootNode().getNamedChild(0);
-
-        ts::Children children{ array_node };
-        auto         it = children.begin();
-
-        // Check pre-increment
-        CHECK(it->getType().compare("[") == 0);
-        ++it;
-        CHECK(it->getType().compare("number") == 0);
-
-        // Check post-increment
-        it++;
-        CHECK(it->getType().compare(",") == 0);
-    }
-}
-
-TEST_CASE("LookaheadIterator Exceptions and State Control", "[iterators][lookahead]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    ts::Tree     tree        = parser.parseString("{}");
-    ts::Node     root        = tree.getRootNode();
-    ts::StateID  valid_state = root.getParseState();
-
-    SECTION("Constructor throws on invalid language")
-    {
-        ts::Language invalid_lang(nullptr);
-        CHECK_THROWS_AS(ts::LookaheadIterator(invalid_lang, 0), std::runtime_error);
-    }
-
-    SECTION("Constructor throws on invalid state")
-    {
-        // Provide an absurdly high state ID that doesn't exist in the grammar
-        constexpr ts::StateID invalid_state = std::numeric_limits<ts::StateID>::max();
-        CHECK_THROWS_AS(ts::LookaheadIterator(lang, invalid_state), std::runtime_error);
-    }
-
-    SECTION("Reset state and language")
-    {
-        ts::LookaheadIterator it(lang, valid_state);
-
-        // Resetting to the same or another valid state should return true
-        CHECK(it.resetState(valid_state) == true);
-
-        // Resetting language and state entirely
-        CHECK(it.reset(lang, valid_state) == true);
-    }
-
-    SECTION("Property accessors")
-    {
-        ts::LookaheadIterator it(lang, valid_state);
-
-        // Verify the language getter returns the correct underlying pointer
-        CHECK(it.getLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());
-        bool ok = it.next();
-
-        if (ok && it.next())
+        std::vector<std::string> symbols;
+        while (iterator.next())
         {
-            // Verify that the underlying C API pointer is accessible
-            CHECK(it.operator const TSLookaheadIterator *() != nullptr);
-
-            // Verify symbol integer ID is accessible and valid
-            ts::Symbol sym = it.getCurrentSymbol();
-            CHECK(sym > 0);
+            symbols.push_back(std::string(iterator.getCurrentSymbolName()));
+            CHECK_FALSE(iterator.getCurrentSymbolName().empty());
+            CHECK(json.language.getView().getSymbolName(iterator.getCurrentSymbol())
+                  == iterator.getCurrentSymbolName());
         }
+        CHECK_FALSE(symbols.empty());
+        // Exhaustion is sticky since tree-sitter 0.27.
+        CHECK_FALSE(iterator.next());
+
+        // Resetting starts over.
+        REQUIRE(iterator.resetState(state));
+        std::size_t again = 0;
+        while (iterator.next())
+        {
+            ++again;
+        }
+        CHECK(again == symbols.size());
+        CHECK(iterator.reset(json.language, state));
     }
 
-    SECTION("Move semantics")
+    SECTION("Constructor and move")
     {
-        ts::LookaheadIterator it1(lang, valid_state);
-        ts::LookaheadIterator it2 = std::move(it1);
+        ts::LookaheadIterator constructed(json.language, state);
+        CHECK(constructed.next());
 
-        // it2 should now be valid and able to iterate
-        CHECK(it2.operator const TSLookaheadIterator *() != nullptr);
+        ts::LookaheadIterator moved(std::move(constructed));
+        CHECK(static_cast<const TSLookaheadIterator *>(moved) != nullptr);
+        CHECK(static_cast<const TSLookaheadIterator *>(constructed) == nullptr);
+    }
+
+    SECTION("Invalid language or state")
+    {
+        CHECK_THROWS_AS(ts::LookaheadIterator(json.language, 0xFFFF), std::runtime_error);
+        CHECK_THROWS_AS(ts::LookaheadIterator(ts::LanguageView(), 1), std::runtime_error);
     }
 }

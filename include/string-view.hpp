@@ -10,12 +10,48 @@
 #include <stdexcept>
 #include <string>
 
+#ifndef CPP_TS_NODISCARD
+#define CPP_TS_NODISCARD
+#endif // CPP_TS_NODISCARD
+
+#ifndef CPP_TS_CONSTEXPR14
+#if __cplusplus > 201103L || (defined(_MSVC_LANG) && _MSVC_LANG > 201103L)
+#define CPP_TS_CONSTEXPR14 constexpr
+#else
+#define CPP_TS_CONSTEXPR14
+#endif
+#endif // CPP_TS_CONSTEXPR14
+
 namespace ts
 {
     namespace details
     {
+        /**
+         * @brief Holder of the `npos` constant of `StringView`.
+         * @details A static data member of a class template may be defined in a header, which gives `npos` the
+         * out-of-line definition C++11/14 require when it is odr-used, without violating the ODR.
+         * @tparam T Unused.
+         */
+        template <typename T = void>
+        struct StringViewConstants
+        {
+#pragma region CONSTANTS
+
+            ////////////////////////////////////////////////////////////////
+            // Constants
+            ////////////////////////////////////////////////////////////////
+
+            /// @brief Special value meaning "until the end of the view" or "not found".
+            static constexpr std::size_t npos = std::size_t(-1);
+
+#pragma endregion
+        };
+
+        template <typename T>
+        constexpr std::size_t StringViewConstants<T>::npos;
+
         /// @brief Non-owning read-only view over a contiguous character sequence.
-        class StringView
+        class StringView : public StringViewConstants<>
         {
         public:
 #pragma region TYPE_ALIASES
@@ -24,13 +60,28 @@ namespace ts
             // Type Aliases
             ////////////////////////////////////////////////////////////////
 
-            using value_type             = char;
-            using data_type              = const value_type *;
-            using size_type              = std::size_t;
-            using pointer                = data_type;
-            using const_pointer          = data_type;
-            using const_reference        = const value_type &;
-            using const_iterator         = data_type;
+            /// @brief Type of the characters.
+            using value_type = char;
+
+            /// @brief Pointer to the viewed characters.
+            using data_type = const value_type *;
+
+            /// @brief Type of sizes and positions.
+            using size_type = std::size_t;
+
+            /// @brief Pointer to a character.
+            using pointer = data_type;
+
+            /// @brief Pointer to a const character.
+            using const_pointer = data_type;
+
+            /// @brief Reference to a const character.
+            using const_reference = const value_type &;
+
+            /// @brief Iterator over the characters.
+            using const_iterator = data_type;
+
+            /// @brief Reverse iterator over the characters.
             using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
 #pragma endregion
@@ -41,8 +92,8 @@ namespace ts
             // Constants
             ////////////////////////////////////////////////////////////////
 
-            /// @brief Special value indicating that no valid position or size was specified.
-            static constexpr size_type npos = size_type(-1);
+            /// @brief Special value indicating that no valid position or size was specified (inherited).
+            using StringViewConstants<>::npos;
 
 #pragma endregion
 
@@ -113,7 +164,7 @@ namespace ts
              * @brief Returns a pointer to the first character.
              * @return Pointer to the first character, or nullptr for an empty default-constructed view.
              */
-            [[nodiscard]] constexpr const_pointer data() const noexcept
+            CPP_TS_NODISCARD constexpr const_pointer data() const noexcept
             {
                 return data_;
             }
@@ -122,7 +173,7 @@ namespace ts
              * @brief Returns an iterator to the first character.
              * @return Iterator pointing to the first character.
              */
-            [[nodiscard]] constexpr const_iterator begin() const noexcept
+            CPP_TS_NODISCARD constexpr const_iterator begin() const noexcept
             {
                 return data_;
             }
@@ -131,7 +182,7 @@ namespace ts
              * @brief Returns an iterator past the last character.
              * @return Iterator pointing past the last character.
              */
-            [[nodiscard]] constexpr const_iterator end() const noexcept
+            CPP_TS_NODISCARD constexpr const_iterator end() const noexcept
             {
                 return data_ + size_;
             }
@@ -140,7 +191,7 @@ namespace ts
              * @brief Returns a const iterator to the first character.
              * @return Const iterator pointing to the first character.
              */
-            [[nodiscard]] constexpr const_iterator cbegin() const noexcept
+            CPP_TS_NODISCARD constexpr const_iterator cbegin() const noexcept
             {
                 return data_;
             }
@@ -149,7 +200,7 @@ namespace ts
              * @brief Returns a const iterator past the last character.
              * @return Const iterator pointing past the last character.
              */
-            [[nodiscard]] constexpr const_iterator cend() const noexcept
+            CPP_TS_NODISCARD constexpr const_iterator cend() const noexcept
             {
                 return data_ + size_;
             }
@@ -158,7 +209,7 @@ namespace ts
              * @brief Returns a reverse iterator to the last character.
              * @return Reverse iterator pointing to the last character.
              */
-            [[nodiscard]] const_reverse_iterator rbegin() const noexcept
+            CPP_TS_NODISCARD const_reverse_iterator rbegin() const noexcept
             {
                 return const_reverse_iterator(end());
             }
@@ -167,7 +218,7 @@ namespace ts
              * @brief Returns a reverse iterator past the first character.
              * @return Reverse iterator pointing past the first character.
              */
-            [[nodiscard]] const_reverse_iterator rend() const noexcept
+            CPP_TS_NODISCARD const_reverse_iterator rend() const noexcept
             {
                 return const_reverse_iterator(begin());
             }
@@ -176,7 +227,7 @@ namespace ts
              * @brief Returns a const reverse iterator to the last character.
              * @return Const reverse iterator pointing to the last character.
              */
-            [[nodiscard]] const_reverse_iterator crbegin() const noexcept
+            CPP_TS_NODISCARD const_reverse_iterator crbegin() const noexcept
             {
                 return const_reverse_iterator(cend());
             }
@@ -185,7 +236,7 @@ namespace ts
              * @brief Returns a const reverse iterator past the first character.
              * @return Const reverse iterator pointing past the first character.
              */
-            [[nodiscard]] const_reverse_iterator crend() const noexcept
+            CPP_TS_NODISCARD const_reverse_iterator crend() const noexcept
             {
                 return const_reverse_iterator(cbegin());
             }
@@ -202,7 +253,7 @@ namespace ts
              * @brief Returns the number of characters in the view.
              * @return Number of characters in the view.
              */
-            [[nodiscard]] constexpr size_type size() const noexcept
+            CPP_TS_NODISCARD constexpr size_type size() const noexcept
             {
                 return size_;
             }
@@ -211,7 +262,7 @@ namespace ts
              * @brief Returns the number of characters in the view.
              * @return Number of characters in the view.
              */
-            [[nodiscard]] constexpr size_type length() const noexcept
+            CPP_TS_NODISCARD constexpr size_type length() const noexcept
             {
                 return size_;
             }
@@ -220,7 +271,7 @@ namespace ts
              * @brief Returns the maximum representable view size.
              * @return Maximum number of characters representable by the view.
              */
-            [[nodiscard]] constexpr size_type max_size() const noexcept
+            CPP_TS_NODISCARD constexpr size_type max_size() const noexcept
             {
                 return npos;
             }
@@ -229,7 +280,7 @@ namespace ts
              * @brief Checks whether the view contains no characters.
              * @return Returns true if the view is empty, otherwise false.
              */
-            [[nodiscard]] constexpr bool empty() const noexcept
+            CPP_TS_NODISCARD constexpr bool empty() const noexcept
             {
                 return size_ == 0;
             }
@@ -247,7 +298,7 @@ namespace ts
              * @param pos Zero-based position of the character.
              * @return Character at the specified position.
              */
-            [[nodiscard]] constexpr const_reference operator[](size_type pos) const noexcept
+            CPP_TS_NODISCARD constexpr const_reference operator[](size_type pos) const noexcept
             {
                 return data_[pos];
             }
@@ -258,7 +309,7 @@ namespace ts
              * @return Character at the specified position.
              * @throws std::out_of_range If pos is outside the view.
              */
-            [[nodiscard]] constexpr const_reference at(size_type pos) const
+            CPP_TS_NODISCARD constexpr const_reference at(size_type pos) const
             {
                 return (pos >= size_) ? throw std::out_of_range("StringView::at") : data_[pos];
             }
@@ -267,7 +318,7 @@ namespace ts
              * @brief Returns the first character in the view.
              * @return Reference to the first character.
              */
-            [[nodiscard]] constexpr const_reference front() const noexcept
+            CPP_TS_NODISCARD constexpr const_reference front() const noexcept
             {
                 return data_[0];
             }
@@ -276,7 +327,7 @@ namespace ts
              * @brief Returns the last character in the view.
              * @return Reference to the last character.
              */
-            [[nodiscard]] constexpr const_reference back() const noexcept
+            CPP_TS_NODISCARD constexpr const_reference back() const noexcept
             {
                 return data_[size_ - 1];
             }
@@ -293,7 +344,7 @@ namespace ts
              * @brief Removes characters from the beginning of the view.
              * @param n Number of characters to remove.
              */
-            constexpr void remove_prefix(size_type n) noexcept
+            CPP_TS_CONSTEXPR14 void remove_prefix(size_type n) noexcept
             {
                 data_ += n;
                 size_ -= n;
@@ -303,7 +354,7 @@ namespace ts
              * @brief Removes characters from the end of the view.
              * @param n Number of characters to remove.
              */
-            constexpr void remove_suffix(size_type n) noexcept
+            CPP_TS_CONSTEXPR14 void remove_suffix(size_type n) noexcept
             {
                 size_ -= n;
             }
@@ -312,7 +363,7 @@ namespace ts
              * @brief Exchanges the contents of this view with another view.
              * @param other String view to exchange contents with.
              */
-            constexpr void swap(StringView &other) noexcept
+            CPP_TS_CONSTEXPR14 void swap(StringView &other) noexcept
             {
                 const data_type d = data_;
                 data_             = other.data_;
@@ -330,7 +381,7 @@ namespace ts
              * @return String view containing the requested substring.
              * @throws std::out_of_range If pos is greater than the view size.
              */
-            [[nodiscard]] constexpr StringView substr(size_type pos = 0, size_type count = npos) const
+            CPP_TS_NODISCARD constexpr StringView substr(size_type pos = 0, size_type count = npos) const
             {
                 return (pos > size_) ? throw std::out_of_range("StringView::substr")
                                      : StringView(data_ + pos, (count < size_ - pos) ? count : size_ - pos);
@@ -344,7 +395,7 @@ namespace ts
              * @return Number of characters copied.
              * @throws std::out_of_range If pos is greater than the view size.
              */
-            [[nodiscard]] size_type copy(char *dest, size_type count, size_type pos = 0) const
+            CPP_TS_NODISCARD size_type copy(char *dest, size_type count, size_type pos = 0) const
             {
                 if (pos > size_)
                 {
@@ -369,11 +420,9 @@ namespace ts
              * @return Negative value if this view precedes v, zero if they are equal, or positive value if this view
              * follows v.
              */
-            [[nodiscard]] constexpr int compare(StringView v) const noexcept
+            CPP_TS_NODISCARD constexpr int compare(StringView v) const noexcept
             {
-                const size_type rlen = (size_ < v.size_) ? size_ : v.size_;
-                const int       cmp  = compare_n(data_, v.data_, rlen);
-                return cmp != 0 ? cmp : (size_ < v.size_ ? -1 : (size_ > v.size_ ? 1 : 0));
+                return compare_result(compare_n(data_, v.data_, (size_ < v.size_) ? size_ : v.size_), size_, v.size_);
             }
 
             /**
@@ -382,7 +431,7 @@ namespace ts
              * @return Negative value if this view precedes s, zero if they are equal, or positive value if this view
              * follows s.
              */
-            [[nodiscard]] constexpr int compare(const char *s) const noexcept
+            CPP_TS_NODISCARD constexpr int compare(const char *s) const noexcept
             {
                 return compare(StringView(s));
             }
@@ -393,7 +442,7 @@ namespace ts
              * @return Negative value if this view precedes s, zero if they are equal, or positive value if this view
              * follows s.
              */
-            [[nodiscard]] int compare(const std::string &s) const noexcept
+            CPP_TS_NODISCARD int compare(const std::string &s) const noexcept
             {
                 return compare(StringView(s));
             }
@@ -404,7 +453,7 @@ namespace ts
              * @param rhs Right-hand string view.
              * @return Returns true if both views contain the same characters, otherwise false.
              */
-            [[nodiscard]] constexpr friend bool operator==(StringView lhs, StringView rhs) noexcept
+            CPP_TS_NODISCARD constexpr friend bool operator==(StringView lhs, StringView rhs) noexcept
             {
                 return lhs.size_ == rhs.size_ && compare_n(lhs.data_, rhs.data_, lhs.size_) == 0;
             }
@@ -415,7 +464,7 @@ namespace ts
              * @param rhs Right-hand string view.
              * @return Returns true if the views differ, otherwise false.
              */
-            [[nodiscard]] constexpr friend bool operator!=(StringView lhs, StringView rhs) noexcept
+            CPP_TS_NODISCARD constexpr friend bool operator!=(StringView lhs, StringView rhs) noexcept
             {
                 return !(lhs == rhs);
             }
@@ -426,7 +475,7 @@ namespace ts
              * @param rhs Right-hand string view.
              * @return Returns true if lhs is lexicographically less than rhs, otherwise false.
              */
-            [[nodiscard]] constexpr friend bool operator<(StringView lhs, StringView rhs) noexcept
+            CPP_TS_NODISCARD constexpr friend bool operator<(StringView lhs, StringView rhs) noexcept
             {
                 return lhs.compare(rhs) < 0;
             }
@@ -437,7 +486,7 @@ namespace ts
              * @param rhs Right-hand string view.
              * @return True if lhs is lexicographically less than or equal to rhs, otherwise false.
              */
-            [[nodiscard]] constexpr friend bool operator<=(StringView lhs, StringView rhs) noexcept
+            CPP_TS_NODISCARD constexpr friend bool operator<=(StringView lhs, StringView rhs) noexcept
             {
                 return lhs.compare(rhs) <= 0;
             }
@@ -448,7 +497,7 @@ namespace ts
              * @param rhs Right-hand string view.
              * @return Returns true if lhs is lexicographically greater than rhs, otherwise false.
              */
-            [[nodiscard]] constexpr friend bool operator>(StringView lhs, StringView rhs) noexcept
+            CPP_TS_NODISCARD constexpr friend bool operator>(StringView lhs, StringView rhs) noexcept
             {
                 return lhs.compare(rhs) > 0;
             }
@@ -459,7 +508,7 @@ namespace ts
              * @param rhs Right-hand string view.
              * @return Returns true if lhs is lexicographically greater than or equal to rhs, otherwise false.
              */
-            [[nodiscard]] constexpr friend bool operator>=(StringView lhs, StringView rhs) noexcept
+            CPP_TS_NODISCARD constexpr friend bool operator>=(StringView lhs, StringView rhs) noexcept
             {
                 return lhs.compare(rhs) >= 0;
             }
@@ -476,7 +525,7 @@ namespace ts
              * @brief Converts the view into an owning string.
              * @return String containing a copy of the characters in the view.
              */
-            [[nodiscard]] explicit operator std::string() const
+            CPP_TS_NODISCARD explicit operator std::string() const
             {
                 return size_ ? std::string(data_, size_) : std::string();
             }
@@ -490,6 +539,11 @@ namespace ts
             // Private Methods
             ////////////////////////////////////////////////////////////////
 
+            /**
+             * @brief Returns the length of a null-terminated string (constexpr where the compiler provides a builtin).
+             * @param s Null-terminated string.
+             * @return Returns the length of the string.
+             */
             static constexpr size_type traits_length(const char *s) noexcept
             {
 #if defined(__GNUC__) || defined(__clang__) || (defined(_MSC_VER) && _MSC_VER >= 1926)
@@ -499,6 +553,25 @@ namespace ts
 #endif // defined(__GNUC__) || defined(__clang__) || (defined(_MSC_VER) && _MSC_VER >= 1926)
             }
 
+            /**
+             * @brief Combines the comparison of the common prefix with the comparison of the sizes.
+             * @param cmp Result of comparing the common prefix.
+             * @param lhs_size Size of the first view.
+             * @param rhs_size Size of the second view.
+             * @return Returns a negative value, zero or a positive value.
+             */
+            static constexpr int compare_result(int cmp, size_type lhs_size, size_type rhs_size) noexcept
+            {
+                return cmp != 0 ? cmp : (lhs_size < rhs_size ? -1 : (lhs_size > rhs_size ? 1 : 0));
+            }
+
+            /**
+             * @brief Compares `n` characters (`memcmp`, constexpr where the compiler provides a builtin).
+             * @param a First characters.
+             * @param b Second characters.
+             * @param n Number of compared characters.
+             * @return Returns a negative value, zero or a positive value.
+             */
             static constexpr int compare_n(const char *a, const char *b, size_type n) noexcept
             {
 #if defined(__GNUC__) || defined(__clang__) || (defined(_MSC_VER) && _MSC_VER >= 1926)
@@ -509,6 +582,11 @@ namespace ts
             }
 
 #if !(defined(__GNUC__) || defined(__clang__) || (defined(_MSC_VER) && _MSC_VER >= 1926))
+            /**
+             * @brief `strlen` replacement for compilers without `__builtin_strlen`.
+             * @param s Null-terminated string.
+             * @return Returns the length of the string.
+             */
             static size_type non_constexpr_strlen(const char *s) noexcept
             {
                 size_type n = 0;
@@ -519,6 +597,13 @@ namespace ts
                 return n;
             }
 
+            /**
+             * @brief `memcmp` replacement for compilers without `__builtin_memcmp`.
+             * @param a First characters.
+             * @param b Second characters.
+             * @param n Number of compared characters.
+             * @return Returns a negative value, zero or a positive value.
+             */
             static int non_constexpr_memcmp(const char *a, const char *b, size_type n) noexcept
             {
                 for (size_type i = 0; i < n; ++i)
@@ -543,7 +628,10 @@ namespace ts
             // Fields
             ////////////////////////////////////////////////////////////////
 
+            /// @brief First viewed character (may be null for an empty view).
             data_type data_;
+
+            /// @brief Number of viewed characters.
             size_type size_;
 
 #pragma endregion

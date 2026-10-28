@@ -1,273 +1,183 @@
-#include "pch.hpp"
+// WasmStore and Wasm languages (built only with CPP_TS_FEATURE_WASM).
 
-#if defined(CPP_TS_TEST_FEATURE_WASM)
+#include "common.hpp"
 
-// cpp-tree-sitter
-#include <cpp-tree-sitter.hpp>
-
-// wasmtime
-#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
-#include <wasmtime.hh>
-#else
-#include <wasm.h>
-#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
-
-// Catch2
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#if defined(CPP_TS_FEATURE_WASM)
 
 // STL
 #include <stdexcept>
 #include <string>
+#include <utility>
 
-#if CPP_TS_TEST_HAS_CXX23
-#include <expected>
-#endif // CPP_TS_TEST_HAS_CXX23
-
-TEST_CASE("Wasm Loading with Wasmtime C++ API", "[wasm]")
+TEST_CASE("WasmStore loads a language from a file", "[wasm]")
 {
-#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
-    // C++ Api Wasm Engine
-    wasmtime::Engine engineCpp;
-    wasm_engine_t   *engine = engineCpp.capi();
-#else
-    // C Api Wasm Engine
-    wasm_engine_t *engine = wasm_engine_new();
-#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
+    ts_test::Engine engine;
+    ts::WasmStore   store(engine.get());
+    REQUIRE(store.isValid());
+    CHECK(store.getLanguageCount() == 0u);
 
-    SECTION("Successful language loading and parsing")
+    ts::Language language;
+    CHECK_FALSE(language.isValid());
+    REQUIRE_NOTHROW(language = store.loadLanguage(ts_test::jsonWasmPath()));
+    REQUIRE(language.isValid());
+    CHECK(language.getView().isWasm());
+    CHECK(store.getLanguageCount() == 1u);
+
+    // The parser takes the store over.
+    ts::Parser parser;
+    parser.setWasmStore(store);
+    CHECK_FALSE(store.isValid());
+    CHECK(parser.hasWasmStore());
+    CHECK(parser.setLanguage(language));
+
+    const ts::Tree tree = parser.parseString("[1, {\"a\": null}]");
+    CHECK_FALSE(tree.hasError());
+    CHECK(tree.getRootNode().getType() == "document");
+    CHECK(tree.getRootNode().getNamedChild(0).getNamedChildCount() == 2u);
+
+    // Taking the store back removes the Wasm language from the parser.
+    store = parser.takeWasmStore();
+    CHECK(store.isValid());
+    CHECK_FALSE(parser.hasWasmStore());
+    CHECK_FALSE(parser.hasLanguage());
+}
+
+TEST_CASE("WasmStore loads a language from memory", "[wasm][regression]")
+{
+    ts_test::Engine   engine;
+    ts::WasmStore     store(engine.get());
+    const std::string buffer = ts_test::readFile(ts_test::jsonWasmPath());
+    REQUIRE_FALSE(buffer.empty());
+
+    // The view covers only "json" (tree-sitter looks up the `tree_sitter_json` export): the wrapper must pass a
+    // null-terminated copy to the C API, otherwise "jsonXXXX" would be used and loading would fail.
+    const std::string  names    = "jsonXXXX";
+    const ts::Language language = store.loadLanguage(ts::StringView(names.data(), 4), buffer);
+    REQUIRE(language.isValid());
+
+    ts::Parser parser(language, store);
+    CHECK_FALSE(parser.parseString("[1, 2]").hasError());
+}
+
+TEST_CASE("WasmStore errors", "[wasm][exceptions]")
+{
+    ts_test::Engine engine;
+    ts::WasmStore   store(engine.get());
+
+    SECTION("Invalid modules and files")
     {
-        // Engine will be deleted by tree-sitter
-        ts::WasmStore store(engine);
+        CHECK_THROWS_AS(store.loadLanguage("json", "not a wasm module"), std::runtime_error);
+        CHECK_THROWS_AS(store.loadLanguage("does-not-exist.wasm"), std::runtime_error);
+    }
 
-        // Loading compilated tree-spitter-json grammar
-        ts::Language json_lang(nullptr);
-        CHECK_FALSE(json_lang.getView().isWasm());
-        REQUIRE_NOTHROW(json_lang = store.loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm"));
-
-        // Loaded language tests
-        REQUIRE(json_lang.getView().isWasm());
-        REQUIRE(store.getLanguageCount() == 1);
-
-        // Parser test using wasm
-        ts::Parser parser;
-
+    SECTION("A store taken over by a parser can no longer be used")
+    {
+        const ts::Language language = store.loadLanguage(ts_test::jsonWasmPath());
+        ts::Parser         parser;
         parser.setWasmStore(store);
-
-        CHECK_FALSE(store.isValid());
-
-#if CPP_TS_TEST_HAS_CXX23
-        auto res = parser.setLanguage(json_lang);
-        CHECK(res.has_value());
-        CHECK(res.value());
-#else
-        CHECK(parser.setLanguage(json_lang));
-#endif // CPP_TS_TEST_HAS_CXX23
-
-        std::string code = R"({"test": 123})";
-        ts::Tree    tree = parser.parseString(code);
-
-        REQUIRE_FALSE(tree.hasError());
-        REQUIRE(tree.getRootNode().getType().compare("document") == 0);
-
-        store = parser.takeWasmStore();
-
-        CHECK(store.isValid());
-        CHECK_FALSE(parser.hasLanguage());
+        CHECK_THROWS_AS(store.loadLanguage(ts_test::jsonWasmPath()), std::logic_error);
+        CHECK_THROWS_AS(store.getLanguageCount(), std::logic_error);
     }
 
-    SECTION("Error handling for invalid Wasm data")
+    SECTION("Null store")
     {
-        ts::WasmStore store(engine);
-
-        // Plain text. Not a binary wasm
-        std::string garbage = "not a wasm file";
-
-        // WasmErrorHelper::validate error
-        REQUIRE_THROWS_AS(store.loadLanguage("invalid", garbage), std::runtime_error);
+        const ts::WasmStore empty(static_cast<TSWasmStore *>(nullptr));
+        CHECK_FALSE(empty.isValid());
     }
 }
 
-TEST_CASE("WasmStore Lifecycle", "[wasm]")
+TEST_CASE("Parser with a Wasm language", "[wasm][parser]")
 {
-#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
-    // C++ Api Wasm Engine
-    wasmtime::Engine engineCpp;
-    wasm_engine_t   *raw_engine = engineCpp.capi();
-#else
-    // C Api Wasm Engine
-    wasm_engine_t *raw_engine = wasm_engine_new();
-#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
+    ts_test::Engine    engine;
+    ts::WasmStore      store(engine.get());
+    const ts::Language language = store.loadLanguage(ts_test::jsonWasmPath());
 
-    SECTION("RAII Safety")
+    SECTION("The constructor takes the store over")
     {
-        {
-            ts::WasmStore store(raw_engine);
-            // WasmStore Live here
-        }
-        SUCCEED("WasmStore destroyed without crashing");
-    }
-}
-
-TEST_CASE("Parser Wasm Exceptions and Guardrails", "[wasm][parser][exceptions]")
-{
-#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
-    // C++ Api Wasm Engine
-    wasmtime::Engine engine;
-    ts::WasmStore    store(engine.capi());
-#else
-    // C Api Wasm Engine
-    wasm_engine_t *engine = wasm_engine_new();
-    ts::WasmStore  store(engine);
-#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
-
-    ts::Language json_lang = store.loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
-
-    SECTION("Setting Wasm language without WasmStore throws logic_error")
-    {
-        ts::Parser parser;
-
-        CHECK_FALSE(parser.hasWasmStore());
-
-#if CPP_TS_TEST_HAS_CXX23
-        auto res = parser.setLanguage(json_lang);
-        REQUIRE_FALSE(res.has_value());
-        CHECK_THAT(res.error(), Catch::Matchers::ContainsSubstring("WasmStore"));
-#else
-        // The parser must reject a Wasm language if no WasmStore is provided
-        CHECK_THROWS_AS(parser.setLanguage(json_lang), std::logic_error);
-#endif // CPP_TS_TEST_HAS_CXX23
-    }
-
-    SECTION("Constructor throws on invalid language with WasmStore")
-    {
-        ts::Language invalid_lang(nullptr);
-
-        // Constructor should validate the language before transferring the store
-        CHECK_THROWS_AS(ts::Parser(invalid_lang, store), std::runtime_error);
-    }
-}
-
-TEST_CASE("Parser Constructor and WasmStore Transfer", "[wasm][parser]")
-{
-#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
-    // C++ Api Wasm Engine
-    wasmtime::Engine engine;
-    ts::WasmStore    store(engine.capi());
-#else
-    // C Api Wasm Engine
-    wasm_engine_t *engine = wasm_engine_new();
-    ts::WasmStore  store(engine);
-#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
-
-    ts::Language json_lang = store.loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
-
-    SECTION("Initialize Parser directly with WasmStore and Language")
-    {
-        // The constructor should take ownership of the store and set the language safely
-        ts::Parser parser(json_lang, store);
-
+        ts::Parser parser(language, store);
         CHECK(parser.hasLanguage());
         CHECK(parser.hasWasmStore());
-
-        // The original store object should be invalidated after the transfer
         CHECK_FALSE(store.isValid());
-
-        // Verify that parsing works correctly using the transferred store
-        std::string code = "[1, 2, 3]";
-        ts::Tree    tree = parser.parseString(code);
-        CHECK_FALSE(tree.hasError());
+        CHECK_FALSE(parser.parseString("[1, 2, 3]").hasError());
     }
-}
 
-TEST_CASE("Replacing WasmStore in Parser", "[wasm][parser]")
-{
-#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
-    // C++ Api Wasm Engine
-    wasmtime::Engine engine1;
-    wasmtime::Engine engine2;
-    ts::WasmStore    store1(engine1.capi());
-    ts::WasmStore    store2(engine2.capi());
-#else
-    // C Api Wasm Engine
-    wasm_engine_t *engine1 = wasm_engine_new();
-    wasm_engine_t *engine2 = wasm_engine_new();
-    ts::WasmStore  store1(engine1);
-    ts::WasmStore  store2(engine2);
-#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
-
-    ts::Parser parser;
-
-    SECTION("Setting a new WasmStore safely discards the old one")
+    SECTION("A WasmStore is required")
     {
-        parser.setWasmStore(store1);
-        CHECK(parser.hasWasmStore());
-        CHECK_FALSE(store1.isValid());
-
-        // Set a second store without taking the first one back.
-        // The parser should safely delete the previous store internally.
-        parser.setWasmStore(store2);
-        CHECK(parser.hasWasmStore());
-        CHECK_FALSE(store2.isValid());
-
-        // Taking the store should now return the second one (which is valid)
-        ts::WasmStore retrieved_store = parser.takeWasmStore();
-        CHECK(retrieved_store.isValid());
+        ts::Parser parser(tree_sitter_json());
+        REQUIRE(parser.hasLanguage());
         CHECK_FALSE(parser.hasWasmStore());
+
+        // tree-sitter rejects the language and clears the previous one; hasLanguage() must follow tree-sitter.
+        CHECK_THROWS_AS(parser.setLanguage(language), std::logic_error);
+        CHECK_FALSE(parser.hasLanguage());
+        CHECK_THROWS_AS(parser.parseString("[1]"), std::logic_error);
+
+        // Moving a store keeps it usable.
+        ts::WasmStore moved(std::move(store));
+        CHECK(moved.isValid());
+        CHECK_FALSE(store.isValid());
+        parser.setWasmStore(moved);
+        CHECK(parser.setLanguage(language));
+        CHECK(parser.parseString("[1]").isValid());
+    }
+
+    SECTION("An invalid language is rejected before the parser takes the store over")
+    {
+        CHECK_THROWS_AS(ts::Parser(ts::LanguageView(), store), std::runtime_error);
+        CHECK(store.isValid());
+    }
+
+    SECTION("Taking the store removes the Wasm language")
+    {
+        ts::Parser parser(language, store);
+        REQUIRE(parser.hasLanguage());
+
+        // tree-sitter clears a Wasm language when its store is taken; the wrapper does not keep a stale flag.
+        ts::WasmStore taken = parser.takeWasmStore();
+        CHECK_FALSE(parser.hasLanguage());
+        CHECK_FALSE(parser.getCurrentLanguage().isValid());
+        CHECK(taken.isValid());
     }
 }
 
-#if CPP_TS_TEST_HAS_CXX23
-TEST_CASE("Wasm C++23 Features", "[wasm][cxx23]")
+TEST_CASE("Replacing the WasmStore of a parser", "[wasm][parser]")
 {
-#if CPP_TS_TEST_WASMTIME_CXX_ENABLED
-    // C++ Api Wasm Engine
-    wasmtime::Engine engine;
-    wasm_engine_t   *raw_engine = engine.capi();
-#else
-    // C Api Wasm Engine
-    wasm_engine_t *raw_engine = wasm_engine_new();
-#endif // CPP_TS_TEST_WASMTIME_CXX_ENABLED
+    ts_test::Engine first_engine;
+    ts_test::Engine second_engine;
+    ts::WasmStore   first(first_engine.get());
+    ts::WasmStore   second(second_engine.get());
+    ts::Parser      parser;
 
-    SECTION("WasmStore::create success")
-    {
-        auto store_res = ts::WasmStore::create(raw_engine);
-        REQUIRE(store_res.has_value());
-        CHECK(store_res->isValid());
-    }
+    parser.setWasmStore(first);
+    CHECK(parser.hasWasmStore());
+    CHECK_FALSE(first.isValid());
 
-    SECTION("loadLanguageExpected from file success")
-    {
-        auto store_res = ts::WasmStore::create(raw_engine);
-        auto lang_res  = store_res->loadLanguageExpected(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
+    // Setting a second store without taking the first one back releases the first one.
+    parser.setWasmStore(second);
+    CHECK(parser.hasWasmStore());
+    CHECK_FALSE(second.isValid());
 
-        REQUIRE(lang_res.has_value());
-        CHECK(lang_res->isValid());
-        CHECK(lang_res->getView().isWasm());
-    }
-
-    SECTION("loadLanguageExpected failure (invalid file)")
-    {
-        auto store_res = ts::WasmStore::create(raw_engine);
-        auto lang_res  = store_res->loadLanguageExpected("non_existent.wasm");
-
-        CHECK_FALSE(lang_res.has_value());
-        CHECK_THAT(lang_res.error(), Catch::Matchers::ContainsSubstring("Failed to open"));
-    }
-
-    SECTION("Parser::create with WasmStore success")
-    {
-        auto         store_res = ts::WasmStore::create(raw_engine);
-        ts::Language lang      = store_res->loadLanguage(CPP_TS_TEST_WASM_FILES_DIR "/tree-sitter-json.wasm");
-
-        // Testing a static parser factory that accepts a store
-        auto parser_res = ts::Parser::create(lang, *store_res);
-
-        REQUIRE(parser_res.has_value());
-        CHECK(parser_res->hasWasmStore());
-        CHECK_FALSE(store_res->isValid()); // The store should be moved (invalidated)
-    }
+    ts::WasmStore taken = parser.takeWasmStore();
+    CHECK(taken.isValid());
+    CHECK_FALSE(parser.hasWasmStore());
 }
-#endif // CPP_TS_TEST_HAS_CXX23
 
-#endif // defined(CPP_TS_TEST_FEATURE_WASM)
+TEST_CASE("Parser explains an old tree of another language rejected by tree-sitter", "[wasm][parser][edit]")
+{
+    ts_test::Engine    engine;
+    ts::WasmStore      store(engine.get());
+    const ts::Language wasm_json = store.loadLanguage(ts_test::jsonWasmPath());
+
+    // The native and the Wasm JSON grammars are different languages.
+    ts_test::JsonFixture native("[1]");
+    ts::Parser           parser(wasm_json, store);
+    REQUIRE(static_cast<const TSLanguage *>(parser.getCurrentLanguage())
+            != static_cast<const TSLanguage *>(native.language));
+
+    CHECK_THROWS_AS(parser.parseString("[1, 2]", native.tree), std::invalid_argument);
+
+    // Without an old tree the parse works.
+    CHECK(parser.parseString("[1, 2]").isValid());
+}
+
+#endif // defined(CPP_TS_FEATURE_WASM)

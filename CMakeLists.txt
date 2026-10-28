@@ -9,7 +9,7 @@ include(grammar)
 
 project(
     cpp-tree-sitter
-    VERSION 0.26.11
+    VERSION 0.27.1
     LANGUAGES C CXX
     DESCRIPTION "Simple C++ and CMake wrapper around tree-sitter."
 )
@@ -26,7 +26,7 @@ option(CPP_TS_MSVC_STATIC_RUNTIME "Use static MSVC runtime (/MT or /MTd)" OFF)
 # The second library target, cpp-tree-sitter-header-only (INTERFACE), 
 # does not enforce any specific standard. Instead, it seamlessly adapts to the 
 # C++ standard of the consuming/parent project.
-if(DEFINED CPP_TS_CXX_STANDARD AND NOT CACHE{CPP_TS_CXX_STANDARD})
+if(DEFINED CPP_TS_CXX_STANDARD AND NOT DEFINED CACHE{CPP_TS_CXX_STANDARD})
 	set(CPP_TS_CXX_STANDARD "${CPP_TS_CXX_STANDARD}" CACHE STRING "C++ standard to use for cpp-tree-sitter (11, 14, 17, 20, 23)" FORCE)
 endif()
 
@@ -37,7 +37,7 @@ endif()
 set_property(CACHE CPP_TS_CXX_STANDARD PROPERTY STRINGS "11" "14" "17" "20" "23")
 
 # WASMTIME VERSION
-if(DEFINED CPP_TS_WASMTIME_VERSION AND NOT CACHE{CPP_TS_WASMTIME_VERSION})
+if(DEFINED CPP_TS_WASMTIME_VERSION AND NOT DEFINED CACHE{CPP_TS_WASMTIME_VERSION})
 	set(CPP_TS_WASMTIME_VERSION "${CPP_TS_WASMTIME_VERSION}" CACHE STRING "Version of Wasmtime to be fetched from remote" FORCE)
 endif()
 
@@ -46,7 +46,7 @@ if(NOT CPP_TS_WASMTIME_VERSION)
 endif()
 
 # WASMTIME PATH
-if(DEFINED CPP_TS_WASMTIME_PATH AND NOT CACHE{CPP_TS_WASMTIME_PATH})
+if(DEFINED CPP_TS_WASMTIME_PATH AND NOT DEFINED CACHE{CPP_TS_WASMTIME_PATH})
 	set(CPP_TS_WASMTIME_PATH "${CPP_TS_WASMTIME_PATH}" CACHE PATH "Path to locally installed wasmtime" FORCE)
 endif()
 
@@ -67,12 +67,25 @@ message(STATUS "===================================================")
 
 # We want to automatically download and provide tree-sitter to users of
 # the package, so pull it in and retrofit cmake dependencies on top of it.
-CPMAddPackage(
-    NAME tree-sitter
-    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
-    VERSION ${CPP_TS_TS_VERSION}
-    DOWNLOAD_ONLY YES
-)
+# A parent project may provide its own `tree-sitter` target (e.g. a system package): it is reused as-is.
+if(TARGET tree-sitter)
+	message(STATUS "cpp-tree-sitter: Using the existing `tree-sitter` target")
+	set(tree-sitter_ADDED NO)
+else()
+	cpp_ts_add_package(
+		NAME tree-sitter
+		GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
+		VERSION ${CPP_TS_TS_VERSION}
+		DOWNLOAD_ONLY YES
+	)
+
+	if(NOT tree-sitter_SOURCE_DIR)
+		message(FATAL_ERROR
+			"cpp-tree-sitter: CPM did not provide the tree-sitter sources (e.g. CPM_USE_LOCAL_PACKAGES found an "
+			"installed package). Define a `tree-sitter` target before adding cpp-tree-sitter to use an installed library."
+		)
+	endif()
+endif()
 
 if(tree-sitter_ADDED)
 	if(CPP_TS_AMALGAMATED)
@@ -83,13 +96,18 @@ if(tree-sitter_ADDED)
 	endif()
 
 	add_library(tree-sitter STATIC ${TREE_SITTER_SOURCE_FILES})
-    target_include_directories(tree-sitter PRIVATE $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/src> $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/src/wasm>)
-    target_include_directories(tree-sitter PUBLIC  $<INSTALL_INTERFACE:include> $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/include>)
+	target_include_directories(tree-sitter PRIVATE $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/src>)
+	# SYSTEM: warnings enabled by consumers (e.g. -Wpedantic) must not fire inside tree_sitter/api.h.
+	target_include_directories(tree-sitter SYSTEM PUBLIC $<INSTALL_INTERFACE:include> $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/include>)
 	set_target_properties(tree-sitter PROPERTIES 
 		LINKER_LANGUAGE C
 		C_STANDARD_REQUIRED ON
-		POSITION_INDEPENDENT_CODE ON
 	)
+
+	if(NOT DEFINED CMAKE_POSITION_INDEPENDENT_CODE)
+		set_target_properties(tree-sitter PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	endif()
+
 	target_compile_features(tree-sitter PRIVATE c_std_11)
 	target_compile_options(tree-sitter PRIVATE 
 		${TS_ERROR_COMPILE_OPTIONS}
@@ -141,7 +159,9 @@ target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_${CPP_TS_CXX_STANDARD})
 target_compile_definitions(${PROJECT_NAME} PUBLIC CPP_TS_CXX_STANDARD=${CPP_TS_CXX_STANDARD})
 set_target_properties(${PROJECT_NAME} PROPERTIES 
 	LINKER_LANGUAGE CXX
-    CXX_STANDARD_REQUIRED ON
+    CXX_STANDARD ${CPP_TS_CXX_STANDARD}
+	CXX_STANDARD_REQUIRED ON
+	CXX_EXTENSIONS OFF
 	POSITION_INDEPENDENT_CODE ON
 )
 
@@ -197,7 +217,7 @@ if(CPP_TS_FEATURE_WASM)
 
 		set(WASMTIME_URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASM_VERSION}/wasmtime-v${WASM_VERSION}-${WASM_ARCH}-${WASM_PLATFORM}-c-api.${WASM_ARCHIVE_EXT}")
 
-		CPMAddPackage(
+		cpp_ts_add_package(
 			NAME wasmtime
 			URL ${WASMTIME_URL}
 			DOWNLOAD_ONLY YES
@@ -213,6 +233,9 @@ if(CPP_TS_FEATURE_WASM)
 			set(WASMTIME_LIB_DIR ${CPP_TS_WASMTIME_PATH}/lib)
 		endif()
 	endif()
+
+	# Cached, so CPPTSCopyWasmtime also works when called from the consumer's directory scope.
+	set(CPP_TS_WASMTIME_LIB_DIR "${WASMTIME_LIB_DIR}" CACHE INTERNAL "Directory with the wasmtime libraries")
 
 	if(WASMTIME_INCLUDE_DIR AND WASMTIME_LIB_DIR)
 		set(WASMTIME_LIB_NAME wasmtime)
@@ -237,14 +260,14 @@ if(CPP_TS_FEATURE_WASM)
 		)
 
 		# Project
-		target_include_directories(${PROJECT_NAME} PUBLIC ${WASMTIME_INCLUDE_DIR})
+		target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${WASMTIME_INCLUDE_DIR})
 		target_compile_definitions(${PROJECT_NAME} PUBLIC CPP_TS_FEATURE_WASM)
 
-		target_include_directories(${PROJECT_NAME}-header-only INTERFACE ${WASMTIME_INCLUDE_DIR})
+		target_include_directories(${PROJECT_NAME}-header-only SYSTEM INTERFACE ${WASMTIME_INCLUDE_DIR})
 		target_compile_definitions(${PROJECT_NAME}-header-only INTERFACE CPP_TS_FEATURE_WASM)
 
 		# Tree-Sitter
-		target_include_directories(tree-sitter PRIVATE ${WASMTIME_INCLUDE_DIR})
+		target_include_directories(tree-sitter SYSTEM PRIVATE ${WASMTIME_INCLUDE_DIR})
 		target_compile_definitions(tree-sitter PUBLIC TREE_SITTER_FEATURE_WASM)
 		target_link_libraries(tree-sitter PUBLIC ${WASMTIME_LIBRARY})
 
@@ -277,11 +300,11 @@ if(CPP_TS_FEATURE_WASM)
 			message(FATAL_ERROR "CPPTSCopyWasmtime requires TARGET")
 		endif()
 
-		if(EXISTS "${WASMTIME_LIB_DIR}")
+		if(EXISTS "${CPP_TS_WASMTIME_LIB_DIR}")
 			cpp_ts_find_and_copy_lib(
 				TARGET ${arg_TARGET}
 				NAMES wasmtime.dll
-				PATHS ${WASMTIME_LIB_DIR}
+				PATHS ${CPP_TS_WASMTIME_LIB_DIR}
 			)
 		endif()
 	endfunction()

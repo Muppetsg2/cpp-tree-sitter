@@ -1,262 +1,190 @@
-#include "pch.hpp"
+// TreeCursor: navigation, fields, positions, reset, copy and move.
 
-// cpp-tree-sitter
-#include <cpp-tree-sitter.hpp>
-
-// Catch2
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "common.hpp"
 
 // STL
 #include <cstdint>
-#include <string>
 #include <utility>
 
-extern "C" const TSLanguage *tree_sitter_json();
-
-TEST_CASE("TreeCursor navigation", "[cursor]")
+TEST_CASE("Invalid tree cursor", "[cursor][null]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "[1, 2]";
-    ts::Tree     tree = parser.parseString(code);
+    ts::TreeCursor cursor;
 
-    ts::TreeCursor cursor = tree.getRootNode().getCursor();
-
-    SECTION("Walking the tree")
+    SECTION("Navigation fails")
     {
-        CHECK(cursor.getCurrentNode().getType().compare("document") == 0);
+        CHECK_FALSE(cursor.isValid());
+        CHECK_FALSE(cursor.gotoFirstChild());
+        CHECK_FALSE(cursor.gotoLastChild());
+        CHECK_FALSE(cursor.gotoNextSibling());
+        CHECK_FALSE(cursor.gotoPreviousSibling());
+        CHECK_FALSE(cursor.gotoParent());
+        CHECK(cursor.gotoFirstChildForByte(0) == -1);
+        CHECK(cursor.gotoFirstChildForPoint(ts::Point()) == -1);
+    }
 
-        REQUIRE(cursor.gotoFirstChild());
-        CHECK(cursor.getCurrentNode().getType().compare("array") == 0);
+    SECTION("Attributes return neutral values")
+    {
+        CHECK(cursor.getCurrentNode().isNull());
+        CHECK(cursor.getCurrentFieldName().empty());
+        CHECK(cursor.getCurrentFieldID() == 0);
+        CHECK(cursor.getCurrentDescendantIndex() == 0u);
+        CHECK(cursor.getDepthFromOrigin() == 0u);
+        CHECK(cursor == ts::TreeCursor());
+    }
 
-        REQUIRE(cursor.gotoFirstChild()); // '['
-        CHECK(cursor.getCurrentNode().getType().compare("[") == 0);
+    SECTION("Copies and resets stay invalid")
+    {
+        // Copying an empty TSTreeCursor used to read past its (empty) stack.
+        CHECK_FALSE(cursor.copy().isValid());
+        CHECK_FALSE(ts::TreeCursor(TSTreeCursor()).isValid());
 
-        REQUIRE(cursor.gotoNextSibling()); // '1'
-        CHECK(cursor.getCurrentNode().getType().compare("number") == 0);
-
-        REQUIRE(cursor.gotoParent());
-        CHECK(cursor.getCurrentNode().getType().compare("array") == 0);
+        ts::TreeCursor from_null = ts::Node::null().getCursor();
+        CHECK_FALSE(from_null.isValid());
+        CHECK_NOTHROW(cursor.reset(ts::Node::null()));
+        CHECK_NOTHROW(cursor.reset(from_null));
+        CHECK_FALSE(cursor.isValid());
     }
 }
 
-TEST_CASE("TreeCursor Advanced Movements", "[cursor]")
+TEST_CASE("Tree cursor navigation", "[cursor][navigation]")
 {
-    ts::Language   lang(tree_sitter_json());
-    ts::Parser     parser(lang);
-    std::string    code   = "[1, [2, 3], 4]";
-    ts::Tree       tree   = parser.parseString(code);
-    ts::TreeCursor cursor = tree.getRootNode().getCursor();
-
-    SECTION("Deep Navigation")
+    SECTION("Siblings, parent and last child")
     {
+        ts_test::JsonFixture json("[1, true]");
+        ts::TreeCursor       cursor = json.value().getCursor();
+        REQUIRE(cursor.isValid());
+        CHECK(cursor.getCurrentNode() == json.value());
+
+        REQUIRE(cursor.gotoFirstChild());
+        CHECK(cursor.getCurrentNode().getType() == "[");
+        CHECK(cursor.getDepthFromOrigin() == 1u);
+
+        REQUIRE(cursor.gotoNextSibling());
+        CHECK(cursor.getCurrentNode().getType() == "number");
+        REQUIRE(cursor.gotoPreviousSibling());
+        CHECK(cursor.getCurrentNode().getType() == "[");
+
+        REQUIRE(cursor.gotoParent());
+        CHECK(cursor.getCurrentNode() == json.value());
+        // The cursor never leaves the node it was created for.
+        CHECK_FALSE(cursor.gotoParent());
+
+        REQUIRE(cursor.gotoLastChild());
+        CHECK(cursor.getCurrentNode().getType() == "]");
+        CHECK_FALSE(cursor.gotoNextSibling());
+    }
+
+    SECTION("Deep navigation from the root")
+    {
+        ts_test::JsonFixture json("[1, [2, 3], 4]");
+        ts::TreeCursor       cursor = json.root().getCursor();
+        CHECK(cursor.getCurrentNode().getType() == "document");
+
         REQUIRE(cursor.gotoFirstChild());  // array
         REQUIRE(cursor.gotoFirstChild());  // [
         REQUIRE(cursor.gotoNextSibling()); // 1
         REQUIRE(cursor.gotoNextSibling()); // ,
         REQUIRE(cursor.gotoNextSibling()); // inner array
-
-        CHECK(cursor.getCurrentNode().getType().compare("array") == 0);
+        CHECK(cursor.getCurrentNode().getType() == "array");
 
         REQUIRE(cursor.gotoFirstChild());  // inner [
         REQUIRE(cursor.gotoNextSibling()); // 2
-
-        CHECK(cursor.getCurrentNode().getSourceText(code) == "2");
-        CHECK(cursor.getDepthFromOrigin() == 3); // root -> doc -> array -> array -> 2
+        CHECK(json.text(cursor.getCurrentNode()) == "2");
+        CHECK(cursor.getDepthFromOrigin() == 3u); // document -> array -> array -> 2
     }
 }
 
-TEST_CASE("TreeCursor Invalid State Handling", "[cursor][exceptions]")
+TEST_CASE("Tree cursor positions and descendants", "[cursor][navigation]")
 {
-    ts::Node       null_node = ts::Node::null();
-    ts::TreeCursor cursor    = null_node.getCursor();
+    ts_test::JsonFixture json("[10, 20]");
+    ts::TreeCursor       cursor = json.value().getCursor();
 
-    SECTION("Validation flags")
-    {
-        CHECK_FALSE(cursor.isValid());
-    }
+    CHECK(cursor.gotoFirstChildForByte(5) == 3); // [ 10 , 20 ]
+    CHECK(json.text(cursor.getCurrentNode()) == "20");
 
-    SECTION("Navigation methods safely return false or -1")
-    {
-        CHECK_FALSE(cursor.gotoParent());
-        CHECK_FALSE(cursor.gotoFirstChild());
-        CHECK_FALSE(cursor.gotoLastChild());
-        CHECK_FALSE(cursor.gotoNextSibling());
-        CHECK_FALSE(cursor.gotoPreviousSibling());
+    cursor.reset(json.value());
+    CHECK(cursor.gotoFirstChildForPoint(ts::Point(0, 1)) == 1);
+    CHECK(json.text(cursor.getCurrentNode()) == "10");
 
-        CHECK(cursor.gotoFirstChildForByte(0) == -1);
-        CHECK(cursor.gotoFirstChildForPoint({ 0, 0 }) == -1);
-    }
-
-    SECTION("Attribute methods return safe defaults")
-    {
-        CHECK(cursor.getCurrentNode().isNull());
-        CHECK(cursor.getCurrentFieldName().empty());
-        CHECK(cursor.getCurrentFieldID() == 0);
-        CHECK(cursor.getCurrentDescendantIndex() == 0);
-        CHECK(cursor.getDepthFromOrigin() == 0);
-    }
-
-    SECTION("Reset operations on invalid cursor do not crash")
-    {
-        // Should return early and do nothing
-        ts::TreeCursor other_cursor = null_node.getCursor();
-        CHECK_NOTHROW(cursor.reset(null_node));
-        CHECK_NOTHROW(cursor.reset(other_cursor));
-    }
+    cursor.reset(json.value());
+    CHECK(cursor.getCurrentDescendantIndex() == 0u);
+    cursor.gotoDescendant(2); // array, [, 10
+    CHECK(json.text(cursor.getCurrentNode()) == "10");
+    CHECK(cursor.getCurrentDescendantIndex() == 2u);
 }
 
-TEST_CASE("TreeCursor Reset and Copy", "[cursor][lifecycle]")
+TEST_CASE("Tree cursor fields", "[cursor][fields]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "[1, 2]";
-    ts::Tree     tree = parser.parseString(code);
-    ts::Node     root = tree.getRootNode();
+    ts_test::JsonFixture json("{\"a\": 1}");
+    ts::TreeCursor       cursor = json.value().getNamedChild(0).getCursor(); // pair
 
-    ts::TreeCursor cursor = root.getCursor();
+    REQUIRE(cursor.gotoFirstChild());
+    CHECK(cursor.getCurrentFieldName() == "key");
+    CHECK(cursor.getCurrentFieldID() == json.language.getView().getFieldIDForName("key"));
 
-    SECTION("Copying a cursor replicates its state")
-    {
-        REQUIRE(cursor.gotoFirstChild()); // Move to 'array' node
+    // Going back to a descendant by index restores the field.
+    const std::uint32_t index = cursor.getCurrentDescendantIndex();
+    REQUIRE(cursor.gotoParent());
+    cursor.gotoDescendant(index);
+    CHECK(cursor.getCurrentFieldName() == "key");
 
-        ts::TreeCursor cursor_copy = cursor.copy();
-        CHECK(cursor_copy.isValid());
-        CHECK(cursor_copy.getCurrentNode() == cursor.getCurrentNode());
-    }
+    REQUIRE(cursor.gotoNextSibling()); // ":"
+    CHECK(cursor.getCurrentFieldName().empty());
+    CHECK(cursor.getCurrentFieldID() == 0);
 
-    SECTION("Resetting cursor to node")
-    {
-        REQUIRE(cursor.gotoFirstChild()); // Move to 'array' node
-        CHECK(cursor.getCurrentNode() != root);
-
-        cursor.reset(root); // Reset back to root
-        CHECK(cursor.getCurrentNode() == root);
-    }
-
-    SECTION("Resetting cursor to another cursor")
-    {
-        ts::TreeCursor root_cursor = root.getCursor();
-        REQUIRE(cursor.gotoFirstChild()); // Move to 'array' node
-
-        cursor.reset(root_cursor); // Reset state to match root_cursor
-        CHECK(cursor.getCurrentNode() == root_cursor.getCurrentNode());
-    }
+    REQUIRE(cursor.gotoNextSibling());
+    CHECK(cursor.getCurrentFieldName() == "value");
 }
 
-TEST_CASE("TreeCursor Extended Navigation and Fields", "[cursor][navigation]")
+TEST_CASE("Tree cursor reset, copy and comparison", "[cursor][lifecycle]")
 {
-    ts::Language   lang(tree_sitter_json());
-    ts::Parser     parser(lang);
-    std::string    code   = R"({"key": 42})";
-    ts::Tree       tree   = parser.parseString(code);
-    ts::Node       root   = tree.getRootNode();
-    ts::TreeCursor cursor = root.getCursor();
+    ts_test::JsonFixture json("[1, 2]");
+    ts::TreeCursor       cursor = json.value().getCursor();
+    REQUIRE(cursor.gotoFirstChild());
 
-    SECTION("Navigate backwards (Last Child, Previous Sibling)")
-    {
-        REQUIRE(cursor.gotoFirstChild()); // object
-        REQUIRE(cursor.gotoLastChild());  // '}'
+    // A copy is independent of the original.
+    ts::TreeCursor copy = cursor.copy();
+    CHECK(copy.isValid());
+    CHECK(copy == cursor);
+    CHECK(copy.getCurrentNode() == cursor.getCurrentNode());
+    REQUIRE(copy.gotoNextSibling());
+    CHECK(copy != cursor);
+    CHECK(cursor.getCurrentNode().getType() == "[");
 
-        CHECK(cursor.getCurrentNode().getType().compare("}") == 0);
+    // reset(cursor) copies the state of another cursor.
+    cursor.reset(copy);
+    CHECK(cursor == copy);
 
-        REQUIRE(cursor.gotoPreviousSibling()); // pair
-        CHECK(cursor.getCurrentNode().getType().compare("pair") == 0);
-    }
-
-    SECTION("Descendant indexing and Field Names")
-    {
-        REQUIRE(cursor.gotoFirstChild());  // object
-        REQUIRE(cursor.gotoFirstChild());  // '{'
-        REQUIRE(cursor.gotoNextSibling()); // pair
-
-        // Move into the pair
-        REQUIRE(cursor.gotoFirstChild()); // string ("key")
-
-        // Check field attributes
-        CHECK(cursor.getCurrentFieldName().compare("key") == 0);
-        CHECK(cursor.getCurrentFieldID() > 0);
-
-        // Get descendant index relative to the parent
-        std::uint32_t index = cursor.getCurrentDescendantIndex();
-
-        // Verify we can jump directly back to this descendant
-        REQUIRE(cursor.gotoParent()); // back to pair
-        CHECK_NOTHROW(cursor.gotoDescendant(index));
-        CHECK(cursor.getCurrentFieldName().compare("key") == 0);
-    }
-
-    SECTION("Navigate by Byte and Point")
-    {
-        REQUIRE(cursor.gotoFirstChild());  // object
-        REQUIRE(cursor.gotoFirstChild());  // '{'
-        REQUIRE(cursor.gotoNextSibling()); // pair
-
-        // 9 is the byte offset of the number '42'
-        std::int64_t index_byte = cursor.gotoFirstChildForByte(9);
-        CHECK(index_byte >= 0);
-        CHECK(cursor.getCurrentNode().getType().compare("number") == 0);
-
-        cursor.reset(root);
-        REQUIRE(cursor.gotoFirstChild());  // object
-        REQUIRE(cursor.gotoFirstChild());  // '{'
-        REQUIRE(cursor.gotoNextSibling()); // pair
-
-        // Point navigation (row 0, column 9)
-        std::int64_t index_point = cursor.gotoFirstChildForPoint({ 0, 9 });
-        CHECK(index_point >= 0);
-        CHECK(cursor.getCurrentNode().getType().compare("number") == 0);
-    }
+    // reset(node) starts again from a node; a null node is ignored.
+    cursor.reset(json.root());
+    CHECK(cursor.getCurrentNode() == json.root());
+    cursor.reset(ts::Node::null());
+    CHECK(cursor.getCurrentNode() == json.root());
 }
 
-TEST_CASE("TreeCursor Move Semantics", "[cursor][lifecycle]")
+TEST_CASE("Tree cursor move", "[cursor][lifecycle]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "{}";
-    ts::Tree     tree = parser.parseString(code);
+    ts_test::JsonFixture json("[1]");
+    ts::TreeCursor       cursor = json.value().getCursor();
 
-    SECTION("Move Assignment Operator")
-    {
-        ts::TreeCursor cursor1 = tree.getRootNode().getCursor();
-        ts::TreeCursor cursor2 = ts::Node::null().getCursor();
-        CHECK_FALSE(cursor2.isValid());
+    ts::TreeCursor moved(std::move(cursor));
+    CHECK(moved.isValid());
+    CHECK(moved.getCurrentNode() == json.value());
+    CHECK_FALSE(cursor.isValid());
 
-        cursor2 = std::move(cursor1); // Move ownership
+    ts::TreeCursor assigned;
+    assigned = std::move(moved);
+    CHECK(assigned.isValid());
+    CHECK_FALSE(moved.isValid());
 
-        CHECK(cursor2.isValid());
-        CHECK(cursor2.getCurrentNode().getType().compare("document") == 0);
-    }
+    // Move-assigning over a valid cursor releases its old state.
+    ts::TreeCursor other = json.root().getCursor();
+    other                = std::move(assigned);
+    CHECK(other.getCurrentNode() == json.value());
 
-    SECTION("Move Constructor")
-    {
-        ts::TreeCursor cursor1 = tree.getRootNode().getCursor();
-        ts::TreeCursor cursor2(std::move(cursor1));
-
-        CHECK(cursor2.isValid());
-        CHECK(cursor2.getCurrentNode().getType().compare("document") == 0);
-    }
-}
-
-TEST_CASE("TreeCursor Copy assignment regression", "[cursor][lifecycle]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "[1, 2]";
-    ts::Tree     tree = parser.parseString(code);
-
-    SECTION("Self assignment is safely handled by move mechanics")
-    {
-        ts::TreeCursor cursor1 = tree.getRootNode().getCursor();
-        REQUIRE(cursor1.isValid());
-
-        // C++ sometimes calls `std::move` on `self` (in specific loops). We check whether this will destroy the C
-        // structure:
-        ts::TreeCursor *p_cursor1 = &cursor1;
-        cursor1                   = std::move(*p_cursor1);
-
-        CHECK(cursor1.isValid());
-        CHECK(cursor1.getCurrentNode().getType().compare("document") == 0);
-    }
+    // Self move-assignment keeps the cursor.
+    ts::TreeCursor *self = &other;
+    other                = std::move(*self);
+    CHECK(other.isValid());
+    CHECK(other.getCurrentNode() == json.value());
 }

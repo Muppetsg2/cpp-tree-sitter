@@ -7,14 +7,19 @@
 #include <cpp-tree-sitter.hpp>
 
 // wasmtime
+#if defined(CPP_TS_BENCHMARK_FEATURE_WASM)
 #if CPP_TS_BENCHMARK_WASMTIME_CXX_ENABLED
 #include <wasmtime.hh>
 #else
 #include <wasm.h>
 #endif // CPP_TS_BENCHMARK_WASMTIME_CXX_ENABLED
+#endif // defined(CPP_TS_BENCHMARK_FEATURE_WASM)
 
 // STL
+#include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
@@ -28,17 +33,18 @@
 #include <ios>
 #endif // defined(CPP_TS_BENCHMARK_FEATURE_WASM)
 
-#if CPP_TS_BENCHMARK_HAS_CXX20
-#include <algorithm>
-#endif // CPP_TS_BENCHMARK_HAS_CXX20
-
 #if defined(_WIN32)
 #include <conio.h>
+#include <io.h>
 #else
 #include <termios.h>
 #include <unistd.h>
 #endif // defined(_WIN32)
 
+/**
+ * @brief Returns the JSON grammar (tree-sitter-json, linked statically).
+ * @return Returns the language. Owned by the grammar library.
+ */
 extern "C" const TSLanguage *tree_sitter_json();
 
 #if !defined(CPP_TS_BENCHMARK_WASM_JSON_PATH)
@@ -55,9 +61,23 @@ extern "C" const TSLanguage *tree_sitter_json();
 class Stopwatch
 {
 public:
+#pragma region LIFECYCLE
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Lifecycle
+    /////////////////////////////////////////////////////////////////////////////
+
     /// @brief Creates a Stopwatch object and starts the measurement immediately.
     Stopwatch() : start_time_(std::chrono::high_resolution_clock::now())
     {}
+
+#pragma endregion
+
+#pragma region MEASUREMENT
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Measurement
+    /////////////////////////////////////////////////////////////////////////////
 
     /// @brief Resets and restarts the stopwatch (used before each benchmark iteration).
     inline void reset() noexcept
@@ -69,14 +89,25 @@ public:
      * @brief Returns the elapsed time since creation or the last `reset` call.
      * @return Elapsed time in milliseconds as a double.
      */
-    inline const double read() const noexcept
+    inline double read() const noexcept
     {
         return std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start_time_)
                 .count();
     }
 
+#pragma endregion
+
 private:
+#pragma region FIELDS
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Fields
+    /////////////////////////////////////////////////////////////////////////////
+
+    /// @brief Time of the creation or of the last `reset` call.
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time_;
+
+#pragma endregion
 };
 
 #pragma endregion
@@ -111,6 +142,19 @@ static char getChar()
     }
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore original settings
     return ch;
+#endif // defined(_WIN32)
+}
+
+/**
+ * @brief Checks whether the standard input is an interactive terminal.
+ * @return True when a user can answer prompts (false in CI, with redirected or piped input).
+ */
+static bool isInteractive()
+{
+#if defined(_WIN32)
+    return _isatty(_fileno(stdin)) != 0;
+#else
+    return isatty(STDIN_FILENO) != 0;
 #endif // defined(_WIN32)
 }
 
@@ -159,11 +203,19 @@ static void waitForEnter(const std::string &prompt)
 /// @brief Structure holding a single set of test data.
 struct Dataset
 {
+#pragma region FIELDS
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Fields
+    /////////////////////////////////////////////////////////////////////////////
+
     /// @brief Name/description of the dataset (e.g., "Flat JSON").
     std::string label;
 
     /// @brief Generated source code string to be parsed.
     std::string source;
+
+#pragma endregion
 };
 
 /**
@@ -219,6 +271,12 @@ static std::string generateNestedJson(const std::size_t depth)
 /// @brief Structure storing aggregated timing results for a series of benchmark runs.
 struct Stats
 {
+#pragma region FIELDS
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Fields
+    /////////////////////////////////////////////////////////////////////////////
+
     /// @brief Average execution time.
     double avg;
 
@@ -233,6 +291,8 @@ struct Stats
 
     /// @brief Standard deviation (indicates result stability/variance).
     double stddev;
+
+#pragma endregion
 };
 
 /**
@@ -332,8 +392,8 @@ static void printPercent(const std::string &label, const double percent)
 // Standard-Aware Factory Helpers
 //
 // Under C++23 these route through the non-throwing `T::create(...)` factories
-// (returning `std::expected<T, std::string>`), which the library only
-// declares when `CPP_TS_HAS_CXX23` is set. Under earlier standards those
+// (returning `std::expected<T, ts::Error>`), which the library only
+// declares when `CPP_TS_HAS_EXPECTED` is set. Under earlier standards those
 // factories are not declared at all, so we fall back to the throwing
 // constructors, which have existed since the library's C++11 baseline. A
 // failure is normalized to `std::runtime_error` either way, so every call
@@ -351,7 +411,7 @@ static ts::Parser makeParser(ts::LanguageView language)
     auto result = ts::Parser::create(language);
     if (!result)
     {
-        throw std::runtime_error("Failed to create parser: " + result.error());
+        throw std::runtime_error("Failed to create parser: " + result.error().message);
     }
     return std::move(*result);
 #else
@@ -371,7 +431,7 @@ static ts::Query makeQuery(ts::LanguageView language, const std::string &source)
     auto result = ts::Query::create(language, source);
     if (!result)
     {
-        throw std::runtime_error("Failed to compile query: " + result.error());
+        throw std::runtime_error("Failed to compile query: " + result.error().message);
     }
     return std::move(*result);
 #else
@@ -391,7 +451,7 @@ static ts::WasmStore makeWasmStore(ts::WasmEngine *engine)
     auto result = ts::WasmStore::create(engine);
     if (!result)
     {
-        throw std::runtime_error("Failed to create WASM store: " + result.error());
+        throw std::runtime_error("Failed to create WASM store: " + result.error().message);
     }
     return std::move(*result);
 #else
@@ -411,7 +471,7 @@ static ts::Parser makeWasmParser(ts::LanguageView language, ts::WasmStore &store
     auto result = ts::Parser::create(language, store);
     if (!result)
     {
-        throw std::runtime_error("Failed to create WASM parser: " + result.error());
+        throw std::runtime_error("Failed to create WASM parser: " + result.error().message);
     }
     return std::move(*result);
 #else
@@ -1007,8 +1067,8 @@ static std::size_t benchmarkInterleavedQuery(TSTree              *c_tree,
             watch.reset();
         }
 
-        std::size_t  match_c = 0;
-        TSQueryMatch m;
+        CPP_TS_MAYBE_UNUSED std::size_t match_c = 0;
+        TSQueryMatch                    m;
         while (ts_query_cursor_next_match(c_cursor, &m))
         {
             ++match_c;
@@ -1059,6 +1119,12 @@ static std::size_t benchmarkInterleavedQuery(TSTree              *c_tree,
 /// @brief Data required to simulate text editing and trigger incremental parsing (partial AST update).
 struct EditPlan
 {
+#pragma region FIELDS
+
+    /////////////////////////////////////////////////////////////////////////////
+    // Fields
+    /////////////////////////////////////////////////////////////////////////////
+
     /// @brief Final source string after insertion.
     std::string modified_source;
 
@@ -1067,6 +1133,8 @@ struct EditPlan
 
     /// @brief Edit instruction object for the C++ wrapper.
     ts::InputEdit cpp_edit;
+
+#pragma endregion
 };
 
 /**
@@ -1189,11 +1257,7 @@ static void benchmarkCPPWrapperIncrementalReparse(const std::string   &original_
             watch.reset();
         }
 
-#if CPP_TS_BENCHMARK_HAS_CXX17
         ts::Tree new_tree = parser.parseString(modified_source, std::ref(base_tree));
-#else
-        ts::Tree new_tree = parser.parseString(modified_source, &base_tree);
-#endif
 
         if (isTesting)
         {
@@ -1265,11 +1329,7 @@ static void benchmarkInterleavedIncrementalReparse(const std::string   &original
             watch.reset();
         }
 
-#if CPP_TS_BENCHMARK_HAS_CXX17
         ts::Tree cpp_new = cpp_parser.parseString(modified_source, std::ref(cpp_base));
-#else
-        ts::Tree cpp_new = cpp_parser.parseString(modified_source, &cpp_base);
-#endif
 
         if (isTesting)
         {
@@ -1848,14 +1908,75 @@ static void benchmarkWasmTraversal(const std::string                           &
 // Main
 /////////////////////////////////////////////////////////////////////////////
 
-int main()
+/**
+ * @brief Returns the name and version of the compiler used to build the benchmark.
+ * @return Compiler description.
+ */
+static std::string compilerDescription()
+{
+#if defined(__clang__) && defined(__apple_build_version__)
+    return "AppleClang " + std::to_string(__clang_major__) + "." + std::to_string(__clang_minor__) + "."
+         + std::to_string(__clang_patchlevel__);
+#elif defined(__clang__) && defined(_MSC_VER)
+    return "Clang-cl " + std::to_string(__clang_major__) + "." + std::to_string(__clang_minor__) + "."
+         + std::to_string(__clang_patchlevel__);
+#elif defined(__clang__)
+    return "Clang " + std::to_string(__clang_major__) + "." + std::to_string(__clang_minor__) + "."
+         + std::to_string(__clang_patchlevel__);
+#elif defined(__GNUC__)
+    return "GCC " + std::to_string(__GNUC__) + "." + std::to_string(__GNUC_MINOR__) + "."
+         + std::to_string(__GNUC_PATCHLEVEL__);
+#elif defined(_MSC_VER)
+    return "MSVC " + std::to_string(_MSC_FULL_VER);
+#else
+    return "Unknown compiler";
+#endif
+}
+
+/**
+ * @brief Returns the name of the operating system the benchmark was built for.
+ * @return Operating system name.
+ */
+static const char *systemDescription()
+{
+#if defined(_WIN32)
+    return "Windows";
+#elif defined(__APPLE__)
+    return "MacOS";
+#elif defined(__linux__)
+    return "Linux";
+#else
+    return "Unknown system";
+#endif
+}
+
+/**
+ * @brief Runs the benchmark suite and prints the results.
+ * @param argc Number of arguments.
+ * @param argv Arguments: `--no-wait` skips the final "Press Enter" prompt.
+ * @return Returns 0.
+ */
+int main(int argc, char **argv)
 {
 #pragma region HEADER
     // ---------------------------------------------------------------------
     // Header
     // ---------------------------------------------------------------------
 
+    // `--no-wait` (or a non-interactive standard input, e.g. in CI) skips the final "Press Enter" prompt.
+    bool wait_at_exit = isInteractive();
+    for (int i = 1; i < argc; ++i)
+    {
+        if (std::string(argv[i]) == "--no-wait")
+        {
+            wait_at_exit = false;
+        }
+    }
+
     std::cout << "cpp-tree-sitter Benchmark Suite\n";
+    std::cout << "System: " << systemDescription() << "\n";
+    std::cout << "Compiler: " << compilerDescription() << "\n";
+    std::cout << "C++ language level (__cplusplus): " << static_cast<long>(CPP_TS_CXX_LEVEL) << "\n";
     std::cout << "C++ standard detected: "
 #if CPP_TS_BENCHMARK_HAS_CXX23
               << "C++23 or newer"
@@ -1889,7 +2010,6 @@ int main()
     static constexpr const std::size_t QUERY_ITERATIONS       = 100;
     static constexpr const std::size_t INCREMENTAL_ITERATIONS = 100;
     static constexpr const std::size_t COPY_ITERATIONS        = 100;
-    static constexpr const std::size_t WASM_ITERATIONS        = 50;
 
     std::vector<std::pair<std::string, double>> overhead_summary;
 
@@ -2283,7 +2403,10 @@ int main()
     // End
     // ---------------------------------------------------------------------
 
-    waitForEnter("\nPress Enter to exit...");
+    if (wait_at_exit)
+    {
+        waitForEnter("\nPress Enter to exit...");
+    }
     return EXIT_SUCCESS;
 
 #pragma endregion

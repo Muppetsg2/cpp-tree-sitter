@@ -122,7 +122,7 @@ function(CPPTSAddGrammar)
             message(STATUS "Tree-sitter: No VERSION or GIT_TAG for ${NAME}, defaulting to master/main branch")
         endif()
 		
-		CPMAddPackage(${CPM_ARGS})
+		cpp_ts_add_package(${CPM_ARGS})
         set(NAME ${CPM_LAST_PACKAGE_NAME})
 		
 		if (${NAME}_ADDED)
@@ -201,9 +201,7 @@ function(CPPTSAddGrammar)
                     break()
                 endif()
             endforeach()
-		
-            target_compile_options(${NAME} PRIVATE ${CPP_TS_COMPILE_OPTIONS})
-
+            
             if(MSVC)
 			    target_compile_definitions(${NAME} PRIVATE NOMINMAX)
                 set_target_properties(${NAME} PROPERTIES 

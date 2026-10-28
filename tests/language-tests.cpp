@@ -1,291 +1,210 @@
-#include "pch.hpp"
+// Language (owning) and LanguageView (non-owning) grammar handles.
 
-// cpp-tree-sitter
-#include <cpp-tree-sitter.hpp>
-
-// Catch2
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "common.hpp"
 
 // STL
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
-#if CPP_TS_TEST_HAS_CXX17
-#include <string_view>
-#endif // CPP_TS_TEST_HAS_CXX17
-
-extern "C" const TSLanguage *tree_sitter_json();
-
-// LanguageView is meant to be a cheap, non-owning handle (equivalent to a raw
-// `const TSLanguage*`). If either of these ever fails, something in the
-// class layout silently started doing more than "hold a pointer".
+// LanguageView is meant to be a cheap, non-owning handle (equivalent to a raw `const TSLanguage*`). If either of these
+// ever fails, something in the class layout silently started doing more than "hold a pointer".
 static_assert(std::is_trivially_copyable<ts::LanguageView>::value,
               "LanguageView should stay trivially copyable (non-owning pointer wrapper)");
 static_assert(sizeof(ts::LanguageView) == sizeof(const TSLanguage *),
               "LanguageView should not carry more state than a raw pointer");
 
-TEST_CASE("Language Metadata and Versioning", "[language][languageview]")
+TEST_CASE("Language ownership, copy and move", "[language][lifecycle]")
 {
-    ts::Language     lang(tree_sitter_json());
-    ts::LanguageView view = lang;
-
-    SECTION("Basic Properties")
+    SECTION("Invalid languages")
     {
-        CHECK(view.getSymbolsCount() > 0);
-        CHECK(view.getVersion() > 0);
-        // CHECK(view.getName().compare("json") == 0); This grammar don't have name
-        CHECK(view.getName().compare("") == 0);
-    }
+        const ts::Language     default_language;
+        const ts::Language     null_language(nullptr);
+        const ts::LanguageView default_view;
 
-    SECTION("Symbol Resolution")
-    {
-        ts::Symbol sym = view.getSymbolForName("object", true);
-        CHECK(sym != 0);
-        CHECK(view.getSymbolName(sym).compare("object") == 0);
-        CHECK(view.getSymbolType(sym) == ts::SymbolType::TypeRegular);
-    }
-}
-
-TEST_CASE("Memory Management - Copying", "[lifecycle][language]")
-{
-    ts::Language     lang(tree_sitter_json());
-    ts::LanguageView view = lang;
-    {
-        ts::Language lang_copy = lang; // Copy constructor test (ts_language_copy)
-        CHECK(lang_copy.isValid());
-        CHECK(lang_copy.getView().getSymbolsCount() == view.getSymbolsCount());
-
-        ts::Language lang_moved = std::move(lang_copy); // Move test
-        CHECK(lang_moved.isValid());
-        CHECK(lang_moved.getView().getSymbolsCount() > 0);
-    }
-    CHECK(lang.isValid());
-    CHECK(view.getSymbolsCount() > 0);
-}
-
-TEST_CASE("Language Deep Dive", "[language][languageview]")
-{
-    ts::Language     lang(tree_sitter_json());
-    ts::LanguageView view = lang;
-
-    SECTION("Count Accessors")
-    {
-        CHECK(view.getSymbolsCount() > 0);
-        CHECK(view.getStatesCount() > 0);
-        CHECK(view.getFieldsCount() > 0);
-    }
-
-    SECTION("Field Resolution")
-    {
-        ts::FieldID key_id = view.getFieldIDForName("key");
-        CHECK(key_id > 0);
-
-        ts::StringView field_name = view.getFieldNameForID(key_id);
-        CHECK(field_name.compare("key") == 0);
-
-        CHECK(view.getFieldIDForName("non_existent_field") == 0);
-        CHECK(view.getFieldNameForID(0).compare("") == 0);
-
-        std::vector<ts::StringView> fields = view.getAllFieldsNames();
-        for (const ts::StringView &field : fields)
-        {
-            CHECK(field.compare("") != 0);
-        }
-    }
-
-    SECTION("Type Hierarchy")
-    {
-        std::vector<ts::Symbol> super_types = view.getAllSuperTypes();
-
-        if (!super_types.empty())
-        {
-            ts::Symbol              first_super = super_types[0];
-            std::vector<ts::Symbol> sub_types   = view.getAllSubTypesForSuperType(first_super);
-            CHECK_FALSE(sub_types.empty());
-        }
-    }
-
-    SECTION("State Navigation and Lookahead")
-    {
-        ts::StateID initial_state = 0;
-        ts::Symbol  document_sym  = view.getSymbolForName("document", true);
-
-#if CPP_TS_TEST_HAS_CXX17
-        [[maybe_unused]]
-#endif // CPP_TS_TEST_HAS_CXX17
-        ts::StateID next_state = view.getNextState(initial_state, document_sym);
-
-#if !CPP_TS_TEST_HAS_CXX17
-        static_cast<void>(next_state);
-#endif // !CPP_TS_TEST_HAS_CXX17
-
-        ts::LookaheadIterator li = view.getLookaheadIterator(initial_state);
-        CHECK(li.getLanguage().operator const TSLanguage *() == view.operator const TSLanguage *());
-    }
-
-    SECTION("Metadata")
-    {
-#if CPP_TS_TEST_HAS_CXX17
-        std::optional<ts::LanguageMetadata> meta = view.getMetadata();
-        if (meta)
-        {
-            CHECK(meta->major_version >= 0);
-        }
-#else
-        ts::LanguageMetadata meta = view.getMetadata();
-        CHECK(meta.major_version >= 0);
-#endif // CPP_TS_TEST_HAS_CXX17
-
-#if defined(CPP_TS_TEST_FEATURE_WASM)
-        CHECK_FALSE(view.isWasm());
-#endif // defined(CPP_TS_TEST_FEATURE_WASM)
-    }
-}
-
-TEST_CASE("Language Operators and Assignments", "[language][languageview][lifecycle]")
-{
-    ts::Language lang1(tree_sitter_json());
-    ts::Language lang2(tree_sitter_json());
-
-    SECTION("Assignment operators")
-    {
-        ts::Language lang3 = lang1; // Copy
-        CHECK(lang3.getView().getSymbolsCount() == lang1.getView().getSymbolsCount());
-
-        ts::Language lang4(nullptr); // Null Object
-        CHECK_FALSE(lang4.isValid());
-
-        lang4 = lang1; // Copy-assignment (deep copy, not a swap)
-        CHECK(lang4.isValid());
-        CHECK(lang4.getView().getSymbolsCount() == lang1.getView().getSymbolsCount());
-
-        ts::Language lang5 = std::move(lang1);
-        CHECK(lang5.isValid());
-        CHECK(lang5.getView().getSymbolsCount() > 0);
-    }
-
-    SECTION("C-API Interop")
-    {
-        const TSLanguage *raw = lang2;
-        CHECK(raw != nullptr);
-        CHECK(ts_language_symbol_count(raw) == lang2.getView().getSymbolsCount());
-    }
-
-    SECTION("Conversion to LanguageView")
-    {
-        ts::LanguageView view = lang2; // implicit Language -> LanguageView conversion
-        CHECK(view.isValid());
-        CHECK(view.operator const TSLanguage *() == lang2.operator const TSLanguage *());
-    }
-}
-
-TEST_CASE("Language Invalid State Handling", "[language][languageview][error_handling]")
-{
-    // Language constructed with nullptr
-    ts::Language     invalid_lang(nullptr);
-    ts::LanguageView invalid_view = invalid_lang;
-
-    SECTION("Default construction is also invalid")
-    {
-        ts::Language     default_lang;
-        ts::LanguageView default_view;
-
-        CHECK_FALSE(default_lang.isValid());
+        CHECK_FALSE(default_language.isValid());
+        CHECK_FALSE(default_language.getView().isValid());
+        CHECK_FALSE(null_language.isValid());
         CHECK_FALSE(default_view.isValid());
-        CHECK(default_lang.operator const TSLanguage *() == nullptr);
-        CHECK(default_view.operator const TSLanguage *() == nullptr);
+        CHECK(static_cast<const TSLanguage *>(default_language) == nullptr);
+        CHECK(static_cast<const TSLanguage *>(default_view) == nullptr);
     }
 
-    SECTION("Validation Flags")
+    SECTION("Copy and move")
     {
-        CHECK_FALSE(invalid_lang.isValid());
-        CHECK(invalid_lang.operator const TSLanguage *() == nullptr);
-        CHECK_FALSE(invalid_view.isValid());
-        CHECK(invalid_view.operator const TSLanguage *() == nullptr);
-    }
+        ts::Language language(tree_sitter_json());
+        REQUIRE(language.isValid());
 
-    SECTION("Count Accessors on Invalid State")
-    {
-        CHECK(invalid_view.getSymbolsCount() == 0);
-        CHECK(invalid_view.getStatesCount() == 0);
-        CHECK(invalid_view.getFieldsCount() == 0);
-    }
+        // Copies are independent references (ts_language_copy), usable after the original is gone.
+        ts::Language copy(language);
+        CHECK(copy.isValid());
+        CHECK(copy.getView().getSymbolsCount() == language.getView().getSymbolsCount());
 
-    SECTION("Resolutions on Invalid State")
-    {
-        // Symbol Resolution
-        CHECK(invalid_view.getSymbolName(1).empty());
-        CHECK(invalid_view.getSymbolType(1) == ts::SymbolType::TypeRegular);
-        CHECK(invalid_view.getSymbolForName("test", true) == 0);
+        ts::Language assigned;
+        assigned = copy;
+        CHECK(assigned.isValid());
+        CHECK(assigned.getView().getSymbolsCount() == language.getView().getSymbolsCount());
 
-        // Field Resolution
-        CHECK(invalid_view.getFieldNameForID(1).empty());
-        CHECK(invalid_view.getFieldIDForName("test") == 0);
-    }
+        // Self-assignment keeps the language.
+        ts::Language *self = &assigned;
+        assigned           = *self;
+        CHECK(assigned.isValid());
 
-    SECTION("Type Hierarchy on Invalid State")
-    {
-        CHECK(invalid_view.getAllSuperTypes().empty());
-        CHECK(invalid_view.getAllSubTypesForSuperType(1).empty());
-    }
+        // Moves transfer the handle.
+        const TSLanguage *raw = language;
+        ts::Language      moved(std::move(language));
+        CHECK(static_cast<const TSLanguage *>(moved) == raw);
+        CHECK_FALSE(language.isValid());
 
-    SECTION("Navigation and Exceptions on Invalid State")
-    {
-        CHECK(invalid_view.getNextState(0, 0) == 0);
-        CHECK_THROWS_AS(invalid_view.getLookaheadIterator(0), std::logic_error);
-    }
+        ts::Language move_assigned;
+        move_assigned = std::move(moved);
+        CHECK(static_cast<const TSLanguage *>(move_assigned) == raw);
+        CHECK_FALSE(moved.isValid());
 
-    SECTION("Metadata on Invalid State")
-    {
-        CHECK(invalid_view.getName().empty());
-        CHECK(invalid_view.getVersion() == 0);
-
-#if CPP_TS_TEST_HAS_CXX17
-        CHECK_FALSE(invalid_view.getMetadata().has_value());
-#else
-        ts::LanguageMetadata meta = invalid_view.getMetadata();
-        CHECK(meta.major_version == 0);
-        CHECK(meta.minor_version == 0);
-        CHECK(meta.patch_version == 0);
-#endif // CPP_TS_TEST_HAS_CXX17
+        // Language converts implicitly to LanguageView and to the C API pointer.
+        const ts::LanguageView view = move_assigned;
+        CHECK(static_cast<const TSLanguage *>(view) == raw);
+        CHECK(ts_language_symbol_count(move_assigned) == view.getSymbolsCount());
     }
 }
 
-TEST_CASE("Language Edge Cases", "[language][languageview]")
+TEST_CASE("LanguageView counts, version and parseability", "[language][languageview]")
 {
-    ts::Language     lang(tree_sitter_json());
-    ts::LanguageView view = lang;
+    const ts::Language     language(tree_sitter_json());
+    const ts::LanguageView view = language.getView();
 
-    SECTION("Self Assignment")
-    {
-        ts::Language *ptr_lang = &lang;
-        lang                   = *ptr_lang;
-        CHECK(lang.isValid());
-        CHECK(lang.getView().getSymbolsCount() > 0);
-    }
+    CHECK(view.isValid());
+    CHECK(view.getSymbolsCount() > 0u);
+    CHECK(view.getStatesCount() > 0u);
+    CHECK(view.getFieldsCount() == 2u); // key, value
+    CHECK(view.getVersion() == 14u);    // ABI of the pinned tree-sitter-json grammar
+    CHECK(view.isParseable());
+#if defined(CPP_TS_FEATURE_WASM)
+    CHECK_FALSE(view.isWasm());
+#endif // defined(CPP_TS_FEATURE_WASM)
+}
 
-    SECTION("Invalid lookups on valid language")
-    {
-        // Checking the behavior for a symbol ID that is definitely not a SuperType (e.g., 9999).
-        // We assume that the C API will correctly return null/0 and the wrapper will throw an empty vector.
-        CHECK(view.getAllSubTypesForSuperType(9999).empty());
-    }
+TEST_CASE("LanguageView symbols", "[language][languageview]")
+{
+    const ts::Language     language(tree_sitter_json());
+    const ts::LanguageView view = language.getView();
+
+    const ts::Symbol array = view.getSymbolForName("array", true);
+    REQUIRE(array != 0);
+    CHECK(view.getSymbolName(array) == "array");
+    CHECK(view.getSymbolType(array) == ts::SymbolType::TypeRegular);
+
+    const ts::Symbol bracket = view.getSymbolForName("[", false);
+    REQUIRE(bracket != 0);
+    CHECK(view.getSymbolType(bracket) == ts::SymbolType::TypeAnonymous);
+
+    CHECK(view.getSymbolForName("no_such_symbol", true) == 0);
+
+    // An empty name must not match "ERROR" (tree-sitter compares names with strncmp) and a default-constructed view
+    // (null data() pointer) must not reach the C API.
+    CHECK(view.getSymbolForName(ts::StringView(), true) == 0);
+    CHECK(view.getSymbolForName(ts::StringView(), false) == 0);
+}
+
+TEST_CASE("LanguageView fields", "[language][languageview]")
+{
+    const ts::Language     language(tree_sitter_json());
+    const ts::LanguageView view = language.getView();
+
+    const ts::FieldID key = view.getFieldIDForName("key");
+    REQUIRE(key != 0);
+    CHECK(view.getFieldNameForID(key) == "key");
+    CHECK(view.getFieldNameForID(0).empty());
+    CHECK(view.getFieldIDForName("missing") == 0);
+    CHECK(view.getFieldIDForName(ts::StringView()) == 0);
+
+    const std::vector<ts::details::StringViewReturn> names = view.getAllFieldsNames();
+    REQUIRE(names.size() == 2u);
+    CHECK(((names[0] == "key" && names[1] == "value") || (names[0] == "value" && names[1] == "key")));
+}
 
 #if SIZE_MAX > UINT32_MAX
-    SECTION("Throw exception on size overflow")
-    {
-        // We bypass the real 4GB allocation by creating an artificial view, but with a given gigantic size.
-        const char           *fake_str      = "fake";
-        constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+TEST_CASE("LanguageView rejects names longer than 4GB", "[language][languageview][exceptions]")
+{
+    const ts::Language     language(tree_sitter_json());
+    const ts::LanguageView view = language.getView();
 
-        const ts::StringView huge_view(fake_str, overflow_size);
+    // A view with an artificial size, nothing of that size is allocated.
+    const char           *fake_str      = "fake";
+    constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+    const ts::StringView  huge_view(fake_str, overflow_size);
 
-        CHECK_THROWS_AS(view.getSymbolForName(huge_view, true), std::length_error);
-        CHECK_THROWS_AS(view.getFieldIDForName(huge_view), std::length_error);
-    }
+    CHECK_THROWS_AS(view.getSymbolForName(huge_view, true), std::length_error);
+    CHECK_THROWS_AS(view.getFieldIDForName(huge_view), std::length_error);
+}
 #endif // SIZE_MAX > UINT32_MAX
+
+TEST_CASE("LanguageView metadata and type hierarchy of an ABI 14 grammar", "[language][languageview]")
+{
+    const ts::Language     language(tree_sitter_json());
+    const ts::LanguageView view = language.getView();
+
+    // Names, metadata and supertypes are stored in the language since ABI 15.
+    CHECK(view.getName().empty());
+    CHECK(ts_test::metadata(view).major_version == 0);
+
+    CHECK(view.getAllSuperTypes().empty());
+    CHECK(view.getSuperTypesView().empty());
+    CHECK(view.getSubTypesView(view.getSymbolForName("_value", true)).empty());
+    CHECK(view.getAllSubTypesForSuperType(9999).empty());
+
+    // The zero-copy views match the copying accessors.
+    const std::vector<ts::Symbol> supertypes = view.getAllSuperTypes();
+    const ts::SymbolSpan          span       = view.getSuperTypesView();
+    REQUIRE(span.size() == supertypes.size());
+    for (std::size_t i = 0; i < span.size(); ++i)
+    {
+        CHECK(span[i] == supertypes[i]);
+        CHECK(view.getSubTypesView(span[i]).size() == view.getAllSubTypesForSuperType(span[i]).size());
+    }
+}
+
+TEST_CASE("LanguageView state navigation", "[language][languageview]")
+{
+    const ts::Language     language(tree_sitter_json());
+    const ts::LanguageView view = language.getView();
+
+    const ts::Symbol array = view.getSymbolForName("array", true);
+    CHECK(view.getNextState(1, array) != 0);
+
+    ts::LookaheadIterator iterator = view.getLookaheadIterator(1);
+    CHECK(static_cast<const TSLanguage *>(iterator.getLanguage()) == static_cast<const TSLanguage *>(view));
+}
+
+TEST_CASE("Invalid LanguageView returns neutral values", "[language][languageview]")
+{
+    const ts::LanguageView view;
+
+    CHECK_FALSE(view.isValid());
+    CHECK_FALSE(view.isParseable());
+    CHECK(view.getSymbolsCount() == 0u);
+    CHECK(view.getStatesCount() == 0u);
+    CHECK(view.getFieldsCount() == 0u);
+    CHECK(view.getVersion() == 0u);
+    CHECK(view.getName().empty());
+    CHECK(view.getSymbolName(1).empty());
+    CHECK(view.getSymbolType(1) == ts::SymbolType::TypeRegular);
+    CHECK(view.getSymbolForName("array", true) == 0);
+    CHECK(view.getFieldIDForName("key") == 0);
+    CHECK(view.getFieldNameForID(1).empty());
+    CHECK(view.getAllFieldsNames().empty());
+    CHECK(view.getAllSuperTypes().empty());
+    CHECK(view.getAllSubTypesForSuperType(1).empty());
+    CHECK(view.getSuperTypesView().empty());
+    CHECK(view.getNextState(1, 1) == 0);
+    CHECK(ts_test::metadata(view).major_version == 0);
+#if CPP_TS_HAS_OPTIONAL
+    CHECK_FALSE(view.getMetadata().has_value());
+#endif // CPP_TS_HAS_OPTIONAL
+    CHECK_THROWS_AS(view.getLookaheadIterator(1), std::logic_error);
 }

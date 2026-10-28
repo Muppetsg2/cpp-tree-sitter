@@ -1,0 +1,144 @@
+name: Benchmarks
+
+# Runs the benchmark suite for every compiler/OS pair and every supported C++ standard (Release, IPO,
+# Wasm benchmarks included) and commits the results to docs/benchmarks/<system>-<compiler>-cxx<std>.txt
+# on the branch the workflow was started from.
+#
+# Started manually (Actions -> Benchmarks -> Run workflow): benchmarks take long and their results are
+# committed to the repository. GitHub-hosted runners are shared virtual machines, so compare the
+# wrapper/C API ratios of one file rather than absolute times between files.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_results:
+        description: Commit the result files to docs/benchmarks
+        type: boolean
+        default: true
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: ${{ matrix.system }} / ${{ matrix.compiler }} / C++${{ matrix.std }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang, appleclang, msvc]
+        std: [11, 14, 17, 20, 23]
+        include:
+          - { compiler: gcc,        system: linux,   os: ubuntu-24.04,   cc: gcc-14,   cxx: g++-14 }
+          - { compiler: clang,      system: linux,   os: ubuntu-24.04,   cc: clang-18, cxx: clang++-18 }
+          - { compiler: appleclang, system: macos,   os: macos-latest,   cc: clang,    cxx: clang++ }
+          - { compiler: msvc,       system: windows, os: windows-latest, cc: cl,       cxx: cl }
+        exclude:
+          - { compiler: msvc, std: 11 }
+
+    env:
+      RESULT_FILE: ${{ matrix.system }}-${{ matrix.compiler }}-cxx${{ matrix.std }}.txt
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install CMake and Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Set up MSVC environment
+        if: matrix.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache CPM sources
+        uses: actions/cache@v4
+        with:
+          path: cpm_cache
+          key: cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libs_config.cmake', 'tests/CMakeLists.txt') }}
+          restore-keys: cpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCPM_SOURCE_CACHE="$GITHUB_WORKSPACE/cpm_cache"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCPP_TS_CXX_STANDARD=${{ matrix.std }}
+          -DCPP_TS_FEATURE_WASM=ON
+          -DCPP_TS_BUILD_TESTS=OFF
+          -DCPP_TS_BUILD_BENCHMARK=ON
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --parallel --target cpp-tree-sitter-benchmark
+
+      - name: Run benchmark
+        shell: bash
+        run: |
+          mkdir -p results
+          {
+            echo "# cpp-tree-sitter benchmark"
+            echo "# Configuration: ${{ matrix.system }} / ${{ matrix.compiler }} / C++${{ matrix.std }} / Release, IPO, Wasm ON"
+            echo "# Runner: ${{ matrix.os }} (${ImageOS:-unknown} ${ImageVersion:-}), ${RUNNER_ARCH}"
+            echo "# Commit: ${GITHUB_SHA}"
+            echo "# Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+            echo
+            # --no-wait: no "Press Enter" prompt at the end (stdin is not a terminal in CI anyway).
+            ./build/benchmark/cpp-tree-sitter-benchmark --no-wait < /dev/null
+          } > "results/${RESULT_FILE}"
+          cat "results/${RESULT_FILE}"
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ matrix.system }}-${{ matrix.compiler }}-cxx${{ matrix.std }}
+          path: results/${{ env.RESULT_FILE }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Commit results to docs/benchmarks
+    needs: benchmark
+    # Publish what finished even if some configurations failed.
+    if: ${{ !cancelled() && inputs.commit_results && github.ref_type == 'branch' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-*
+          path: docs/benchmarks
+          merge-multiple: true
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/benchmarks
+          if git diff --cached --quiet; then
+            echo "No benchmark changes to commit."
+            exit 0
+          fi
+          git commit -m "Update benchmark results (${GITHUB_SHA::7})"
+          # The branch may have moved while the benchmarks were running.
+          for attempt in 1 2 3; do
+            if git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            echo "Push attempt ${attempt} failed, retrying."
+            sleep 5
+          done
+          exit 1

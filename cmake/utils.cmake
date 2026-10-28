@@ -49,6 +49,10 @@ set(TS_NO_IPO_LINK_OPTIONS
 	>
 )
 
+# Directory of the cpp-tree-sitter CMake modules. CMAKE_SOURCE_DIR must not be used for this, because it points to
+# the consumer's project when cpp-tree-sitter is added as a dependency.
+set(CPP_TS_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL "Directory of the cpp-tree-sitter CMake modules")
+
 function(cpp_ts_print_config_option NAME)
 	message(STATUS "${NAME} = ${${NAME}}")
 endfunction()
@@ -89,7 +93,7 @@ function(cpp_ts_find_and_copy_lib)
                     -D NAMES="${arg_NAMES}" 
                     -D PATHS="${arg_PATHS}" 
                     -D DEST="$<TARGET_FILE_DIR:${arg_TARGET}>"
-                    -P "${CMAKE_SOURCE_DIR}/cmake/copy_helper.cmake"
+                    -P "${CPP_TS_CMAKE_DIR}/copy_helper.cmake"
                 COMMENT "Searching and copying ${FIRST_NAME} at build time"
             )
 		else()

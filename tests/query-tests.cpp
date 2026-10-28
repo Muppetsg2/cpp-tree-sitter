@@ -1,569 +1,560 @@
-#include "pch.hpp"
+// Query (compilation, metadata, predicates, capture lookup, copy) and QueryCursor (execution, result ranges, limits,
+// ranges, progress callbacks).
 
-// cpp-tree-sitter
-#include <cpp-tree-sitter.hpp>
-
-// Catch2
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "common.hpp"
 
 // STL
+#include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
-#if CPP_TS_TEST_HAS_CXX17
-#include <string_view>
-#endif // CPP_TS_TEST_HAS_CXX17
+#if CPP_TS_HAS_RANGES
+#include <ranges>
+#endif // CPP_TS_HAS_RANGES
 
-#if CPP_TS_TEST_HAS_CXX23
-#include <expected>
-#endif // CPP_TS_TEST_HAS_CXX23
-
-extern "C" const TSLanguage *tree_sitter_json();
-
-TEST_CASE("Query API", "[query]")
+namespace
 {
-    ts::Language lang(tree_sitter_json());
-    // Search for all numbers in file
-    std::string query_source = "((number) @num)";
-
-    CHECK_NOTHROW(ts::Query(lang, query_source));
-
-    SECTION("Invalid query throws")
+    std::uint32_t countMatches(ts::QueryCursor &cursor)
     {
-        CHECK_THROWS_AS(ts::Query(lang, "((invalid_node)"), std::runtime_error);
-    }
-}
-
-TEST_CASE("Detailed Query Execution", "[query][cursor]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = R"({"name": "Gemini", "type": "AI"})";
-    ts::Tree     tree = parser.parseString(code);
-
-    std::string     query_source = "(pair key: (string) @key_name)";
-    ts::Query       query(lang, query_source);
-    ts::QueryCursor cursor;
-    cursor.exec(query, tree.getRootNode());
-
-    SECTION("Iterate Matches and Captures")
-    {
-        ts::QueryMatch           match;
-        std::vector<std::string> keys;
-
+        std::uint32_t  count = 0;
+        ts::QueryMatch match;
         while (cursor.nextMatch(match))
         {
-            for (const ts::QueryCapture &capture : match.captures)
-            {
-                keys.push_back(capture.node.getSourceText(code));
-            }
+            ++count;
         }
-
-        REQUIRE(keys.size() == 2);
-        CHECK(keys[0] == "\"name\"");
-        CHECK(keys[1] == "\"type\"");
+        return count;
     }
+} // namespace
+
+TEST_CASE("Query compilation errors", "[query][exceptions]")
+{
+    const ts::Language language(tree_sitter_json());
+
+    CHECK_NOTHROW(ts::Query(language, "(number) @n"));
+    CHECK_THROWS_AS(ts::Query(language, "(number"), std::runtime_error);          // syntax
+    CHECK_THROWS_AS(ts::Query(language, "((invalid_node)"), std::runtime_error);  // syntax
+    CHECK_THROWS_AS(ts::Query(language, "(no_such_node)"), std::runtime_error);   // node type
+    CHECK_THROWS_AS(ts::Query(language, "(pair nope: (_))"), std::runtime_error); // field
+    CHECK_THROWS_AS(ts::Query(ts::LanguageView(), "(number)"), std::runtime_error);
+
+    // The message names the kind of the error.
+    CHECK(ts_test::contains(ts_test::thrownMessage([&language] { ts::Query query(language, "(no_such_node)"); }),
+                            "Node Type"));
 }
 
-TEST_CASE("Query Metadata and Information", "[query]")
+#if SIZE_MAX > UINT32_MAX
+TEST_CASE("Query rejects sources and names longer than 4GB", "[query][exceptions]")
 {
-    ts::Language lang(tree_sitter_json());
-    std::string  query_source = "((pair key: (string) @key) (#match? @key \"name\"))\n(number)+ @num";
+    const ts::Language language(tree_sitter_json());
 
-    ts::Query query(lang, query_source);
+    // A view with an artificial size, nothing of that size is allocated.
+    const char           *fake_str      = "fake";
+    constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+    const ts::StringView  huge_view(fake_str, overflow_size);
 
-    SECTION("Counts")
+    CHECK_THROWS_AS(ts::Query(language, huge_view), std::length_error);
+
+    ts::Query query(language, "(number) @n");
+    CHECK_THROWS_AS(query.disableCapture(huge_view), std::length_error);
+}
+#endif // SIZE_MAX > UINT32_MAX
+
+TEST_CASE("Query metadata", "[query]")
+{
+    const ts::Language language(tree_sitter_json());
+    const ts::Query    query(language, "(number) @n\n(array (string)+ @s)");
+
+    CHECK(query.isValid());
+    CHECK(query.getPatternCount() == 2u);
+    CHECK(query.getCaptureCount() == 2u);
+    CHECK(query.getCaptureNameForID(0) == "n");
+    CHECK(query.getCaptureNameForID(1) == "s");
+    CHECK(query.getCaptureQuantifierForID(0, 0) == ts::Quantifier::One);
+    CHECK(query.getCaptureQuantifierForID(1, 1) == ts::Quantifier::OneOrMore);
+    CHECK(query.getCaptureQuantifierForID(1, 0) == ts::Quantifier::Zero);
+    CHECK(query.isPatternRooted(0));
+    CHECK_FALSE(query.isPatternNonLocal(0));
+    static_cast<void>(query.isPatternGuaranteedAtStep(0));
+
+    // The end of a pattern includes the whitespace following it, up to the next pattern.
+    CHECK(query.getByteRangeForPattern(0) == ts::Extent<std::uint32_t>(0, 12));
+    CHECK(query.getByteRangeForPattern(1).start == 12u);
+}
+
+TEST_CASE("Query capture lookup by name", "[query]")
+{
+    ts_test::JsonFixture json("{\"a\": 1}");
+    const ts::Query      query(json.language, "(pair key: (string) @key value: (_) @value)");
+
+    const std::uint32_t key   = query.getCaptureIndexForName("key");
+    const std::uint32_t value = query.getCaptureIndexForName("value");
+    CHECK(key == 0u);
+    CHECK(value == 1u);
+    CHECK(query.getCaptureIndexForName("missing") == std::numeric_limits<std::uint32_t>::max());
+
+    ts::QueryCursor cursor;
+    cursor.exec(query, json.root());
+    ts::QueryMatch match;
+    REQUIRE(cursor.nextMatch(match));
+    CHECK(json.text(match.getNodeFor(key)) == "\"a\"");
+    CHECK(json.text(match.getNodeFor(value)) == "1");
+    CHECK(match.getNodeFor(42).isNull());
+}
+
+TEST_CASE("Query predicates", "[query][predicates]")
+{
+    const ts::Language language(tree_sitter_json());
+
+    SECTION("Steps of a predicate")
     {
-        CHECK(query.getPatternCount() == 2);
-        CHECK(query.getCaptureCount() == 2); // @key, @num
-        CHECK(query.getStringCount() >= 1);  // "match?"
+        const ts::Query query(language, "((string) @s (#eq? @s \"\\\"a\\\"\"))");
+
+        // Predicates are exposed as raw steps: "eq?" @s "\"a\"" <done>.
+        const std::vector<ts::QueryPredicateStep> steps = query.getAllPredicatesForPattern(0);
+        REQUIRE(steps.size() == 4u);
+        CHECK(steps[0].type == ts::QueryPredicateStepType::String);
+        CHECK(query.getStringValueForID(steps[0].value_id) == "eq?");
+        CHECK(steps[1].type == ts::QueryPredicateStepType::Capture);
+        CHECK(query.getCaptureNameForID(steps[1].value_id) == "s");
+        CHECK(steps[2].type == ts::QueryPredicateStepType::String);
+        CHECK(query.getStringValueForID(steps[2].value_id) == "\"a\"");
+        CHECK(steps[3].type == ts::QueryPredicateStepType::Done);
+        CHECK(query.getStringCount() == 2u);
     }
 
-    SECTION("Capture and String Resolution")
+    SECTION("String table")
     {
-        CHECK(query.getCaptureNameForID(0).compare("key") == 0);
-        CHECK(query.getCaptureNameForID(1).compare("num") == 0);
+        const ts::Query query(language, "((pair key: (string) @key) (#match? @key \"name\"))\n(number)+ @num");
+        CHECK(query.getPatternCount() == 2u);
+        CHECK(query.getCaptureCount() == 2u);
 
-        bool found_match_pred = false;
+        bool found_match = false;
         for (std::uint32_t i = 0; i < query.getStringCount(); ++i)
         {
-            if (query.getStringValueForID(i).compare("match?") == 0)
-            {
-                found_match_pred = true;
-            }
+            found_match = found_match || query.getStringValueForID(i) == "match?";
         }
-        CHECK(found_match_pred);
+        CHECK(found_match);
     }
 
-    SECTION("Pattern Properties")
+    SECTION("Patterns without predicates")
     {
-        CHECK(query.isPatternRooted(0) == true);
-        ts::Extent<std::uint32_t> range = query.getByteRangeForPattern(0);
-        CHECK(range.end > range.start);
-    }
-
-    SECTION("Quantifiers")
-    {
-        // JSON number
-        CHECK(query.getCaptureQuantifierForID(1, 1) == ts::Quantifier::OneOrMore);
+        const ts::Query plain(language, "(number) @n");
+        CHECK(plain.getAllPredicatesForPattern(0).empty());
     }
 }
 
-TEST_CASE("Query Predicates", "[query]")
+TEST_CASE("Query disabling captures and patterns", "[query]")
 {
-    ts::Language lang(tree_sitter_json());
-    std::string  query_source = "((pair key: (string) @k) (#eq? @k \"\\\"target\\\"\"))";
-    ts::Query    query(lang, query_source);
+    ts_test::JsonFixture json("{\"a\": 1}");
+    ts::QueryCursor      cursor;
 
-    SECTION("Examine Predicate Steps")
+    SECTION("Disabled captures and patterns")
     {
-        std::vector<ts::QueryPredicateStep> steps = query.getAllPredicatesForPattern(0);
-        REQUIRE(steps.size() >= 3); // "eq?", "@k", "\"target\"", "Done"
+        ts::Query query(json.language, "(pair key: (_) @key value: (_) @value)\n(number) @n");
+        query.disableCapture("value");
+        query.disablePattern(1);
 
-        CHECK(steps[0].type == ts::QueryPredicateStepType::String);
-
-        // string "eq?"
-        CHECK(query.getStringValueForID(steps[0].value_id).compare("eq?") == 0);
-
-        // Capture (@k)
-        CHECK(steps[1].type == ts::QueryPredicateStepType::Capture);
-
-        // Last is always Done
-        CHECK(steps.back().type == ts::QueryPredicateStepType::Done);
-    }
-}
-
-TEST_CASE("Query Management", "[query]")
-{
-    ts::Language lang(tree_sitter_json());
-
-    SECTION("Verify disableCapture only removes tags")
-    {
-        ts::Query query(lang, "((string) @s) ((number) @n)");
-        query.disableCapture("n"); // Disable tag @n
-
-        ts::Parser      parser(lang);
-        ts::Tree        tree = parser.parseString("123");
-        ts::QueryCursor cursor;
-        cursor.exec(query, tree.getRootNode());
-
+        cursor.exec(query, json.root());
         ts::QueryMatch match;
-        if (cursor.nextMatch(match))
-        {
-            CHECK(match.captures.empty());
-        }
+        REQUIRE(cursor.nextMatch(match));
+        CHECK(match.pattern_index == 0u);
+        REQUIRE(match.captures.size() == 1u);
+        CHECK(json.text(match.captures[0].node) == "\"a\"");
+        CHECK_FALSE(cursor.nextMatch(match));
     }
 
-    SECTION("Disable Patterns")
+    SECTION("A disabled capture still matches, without captures")
     {
-        ts::Query query(lang, "((string) @s) ((number) @n)");
+        ts::Query query(json.language, "(number) @n");
+        query.disableCapture("n");
+
+        cursor.exec(query, json.root());
+        ts::QueryMatch match;
+        REQUIRE(cursor.nextMatch(match));
+        CHECK(match.captures.empty());
+    }
+
+    SECTION("All patterns disabled")
+    {
+        ts::Query query(json.language, "((string) @s) ((number) @n)");
         query.disablePattern(0);
         query.disablePattern(1);
 
-        ts::Parser      parser(lang);
-        std::string     code = "{\"a\": 1}";
-        ts::Tree        tree = parser.parseString(code);
-        ts::QueryCursor cursor;
-        cursor.exec(query, tree.getRootNode());
-
-        ts::QueryMatch match;
-        CHECK_FALSE(cursor.nextMatch(match));
+        cursor.exec(query, json.root());
+        CHECK(countMatches(cursor) == 0u);
     }
 }
 
-TEST_CASE("Query Anchor regression test", "[query]")
+TEST_CASE("Query copy and move", "[query][lifecycle]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "[1, 2, 3]";
-    ts::Tree     tree = parser.parseString(code);
+    ts_test::JsonFixture json("{\"a\": 1, \"b\": [true, false]}");
+    ts::QueryCursor      cursor;
+    const ts::Query      query(json.language, "(pair key: (string) @key value: (_) @value)");
 
-    SECTION("Match anchored siblings (.)")
+    // The copy (ts_query_copy) is independent: disabling a capture does not affect the original.
+    ts::Query copy(query);
+    copy.disableCapture("value");
+
+    std::uint32_t original_captures = 0;
+    cursor.exec(query, json.root());
+    for (const ts::QueryMatch &match : cursor.matches())
     {
-        // A query that forces the comma to be the *immediate* successor to the first number (anchor `.`).
-        std::string     query_source = "(array (number) @num . \",\" @comma)";
-        ts::Query       query(lang, query_source);
-        ts::QueryCursor cursor;
+        original_captures += static_cast<std::uint32_t>(match.captures.size());
+    }
 
-        cursor.exec(query, tree.getRootNode());
+    std::uint32_t copied_captures = 0;
+    cursor.exec(copy, json.root());
+    for (const ts::QueryMatch &match : cursor.matches())
+    {
+        copied_captures += static_cast<std::uint32_t>(match.captures.size());
+    }
 
+    CHECK(original_captures == 4u);
+    CHECK(copied_captures == 2u);
+
+    ts::Query assigned(json.language, "(number) @n");
+    assigned = query;
+    CHECK(assigned.getCaptureCount() == 2u);
+
+    ts::Query moved(std::move(copy));
+    CHECK(moved.isValid());
+    CHECK_FALSE(copy.isValid());
+    CHECK_THROWS_AS(cursor.exec(copy, json.root()), std::invalid_argument);
+}
+
+TEST_CASE("QueryCursor nextMatch and nextCapture", "[query][cursor]")
+{
+    ts_test::JsonFixture json("{\"a\": 1, \"b\": 2}");
+    const ts::Query      query(json.language, "(pair key: (string) @key value: (_) @value)");
+    ts::QueryCursor      cursor;
+
+    SECTION("Matches")
+    {
+        cursor.exec(query, json.root());
         ts::QueryMatch match;
-        // We check whether the first number and the comma immediately following it have been found.
         REQUIRE(cursor.nextMatch(match));
-        CHECK(match.captures.size() == 2);
-        CHECK(match.captures[0].node.getSourceText(code) == "1");
-        CHECK(match.captures[1].node.getType().compare(",") == 0);
-
-        // The next match should be for the number 2 and the comma following it.
+        CHECK(match.pattern_index == 0u);
+        REQUIRE(match.captures.size() == 2u);
+        CHECK(json.text(match.getNodeFor(0)) == "\"a\"");
+        CHECK(json.text(match.getNodeFor(1)) == "1");
         REQUIRE(cursor.nextMatch(match));
-        CHECK(match.captures[0].node.getSourceText(code) == "2");
-        CHECK(match.captures[1].node.getType().compare(",") == 0);
-
-        // The third number isn't followed by a decimal point; there shouldn't be a 3rd match!
+        CHECK(json.text(match.getNodeFor(0)) == "\"b\"");
         CHECK_FALSE(cursor.nextMatch(match));
     }
 
-    SECTION("Disjoint states (Multiple patterns optimization)")
+    SECTION("Captures come in source order")
     {
-        // Reported issues regarding premature "longest match" truncation resolved in version TS 0.26.11.
-        std::string     query_source = "(array) @arr \n (number) @num";
-        ts::Query       query(lang, query_source);
-        ts::QueryCursor cursor;
-        cursor.exec(query, tree.getRootNode());
-
-        ts::QueryMatch match;
-        std::uint32_t  total_matches = 0;
-        while (cursor.nextMatch(match))
+        cursor.exec(query, json.root());
+        ts::QueryMatch           match;
+        std::vector<std::string> captured;
+        std::uint32_t            index = 0;
+        while (cursor.nextCapture(match, index))
         {
-            ++total_matches;
+            CHECK_FALSE(match.captures[index].node.isNull());
+            captured.push_back(json.text(match.captures[index].node));
         }
-
-        // 1 (for array) + 3 (for number) = 4 matches
-        CHECK(total_matches == 4);
+        REQUIRE(captured.size() == 4u);
+        CHECK(captured[0] == "\"a\"");
+        CHECK(captured[1] == "1");
+        CHECK(captured[3] == "2");
     }
 }
 
-TEST_CASE("QueryCursor Limits and Ranges", "[query][cursor]")
+TEST_CASE("QueryCursor anchors and multiple patterns", "[query][cursor]")
 {
-    ts::Language    lang(tree_sitter_json());
-    ts::Parser      parser(lang);
-    std::string     code = "[1, 2, 3, 4, 5]";
-    ts::Tree        tree = parser.parseString(code);
-    ts::Query       query(lang, "(number) @n");
-    ts::QueryCursor cursor;
+    ts_test::JsonFixture json("[1, 2, 3]");
+    ts::QueryCursor      cursor;
 
-    SECTION("Match Limit")
+    SECTION("Anchored siblings")
     {
-        ts::Query query_complex(lang, "(_ (_)) @match");
+        // The comma must immediately follow the number (anchor `.`); the last number has no comma.
+        const ts::Query query(json.language, "(array (number) @num . \",\" @comma)");
+        cursor.exec(query, json.root());
 
+        ts::QueryMatch match;
+        REQUIRE(cursor.nextMatch(match));
+        REQUIRE(match.captures.size() == 2u);
+        CHECK(json.text(match.captures[0].node) == "1");
+        CHECK(match.captures[1].node.getType() == ",");
+
+        REQUIRE(cursor.nextMatch(match));
+        CHECK(json.text(match.captures[0].node) == "2");
+        CHECK(match.captures[1].node.getType() == ",");
+
+        CHECK_FALSE(cursor.nextMatch(match));
+    }
+
+    SECTION("Disjoint patterns")
+    {
+        // 1 match for the array + 3 for the numbers.
+        const ts::Query query(json.language, "(array) @arr \n (number) @num");
+        cursor.exec(query, json.root());
+        CHECK(countMatches(cursor) == 4u);
+    }
+}
+
+TEST_CASE("QueryCursor matches() and captures() ranges", "[query][cursor]")
+{
+    ts_test::JsonFixture json("{\"a\": 1, \"b\": [true, false]}");
+    const ts::Query      query(json.language, "(pair key: (string) @key value: (_) @value)");
+    ts::QueryCursor      cursor;
+
+    const std::uint32_t key   = query.getCaptureIndexForName("key");
+    const std::uint32_t value = query.getCaptureIndexForName("value");
+
+    SECTION("matches()")
+    {
+        cursor.exec(query, json.root());
+        std::vector<std::string> keys;
+        for (const ts::QueryMatch &match : cursor.matches())
+        {
+            keys.push_back(json.text(match.getNodeFor(key)));
+            CHECK(match.getNodeFor(value).isNamed());
+        }
+        REQUIRE(keys.size() == 2u);
+        CHECK(keys[0] == "\"a\"");
+        CHECK(keys[1] == "\"b\"");
+
+        // A finished execution produces an empty range.
+        std::uint32_t remaining = 0;
+        for (const ts::QueryMatch &match : cursor.matches())
+        {
+            static_cast<void>(match);
+            ++remaining;
+        }
+        CHECK(remaining == 0u);
+    }
+
+    SECTION("captures()")
+    {
+        cursor.exec(query, json.root());
+        std::vector<std::string> texts;
+        for (const ts::QueryCaptureEntry &entry : cursor.captures())
+        {
+            texts.push_back(json.text(entry.capture().node));
+        }
+        REQUIRE(texts.size() == 4u);
+        CHECK(texts[0] == "\"a\"");
+        CHECK(texts[1] == "1");
+        CHECK(texts[2] == "\"b\"");
+        CHECK(texts[3] == "[true, false]");
+    }
+
+#if CPP_TS_HAS_RANGES
+    SECTION("matches() composes with std::views")
+    {
+        cursor.exec(query, json.root());
+        std::uint32_t arrays = 0;
+        for (const ts::QueryMatch &match :
+             cursor.matches()
+                     | std::views::filter([&](const ts::QueryMatch &m)
+                                          { return m.getNodeFor(value).getType() == "array"; }))
+        {
+            static_cast<void>(match);
+            ++arrays;
+        }
+        CHECK(arrays == 1u);
+    }
+#endif // CPP_TS_HAS_RANGES
+}
+
+TEST_CASE("QueryMatch reuses its storage", "[query][cursor]")
+{
+    ts::QueryMatch empty;
+    CHECK(empty.id == 0u);
+    CHECK(empty.captures.empty());
+
+    ts_test::JsonFixture json("[1, 2]");
+    const ts::Query      query(json.language, "(number) @n");
+    ts::QueryCursor      cursor;
+    cursor.exec(query, json.root());
+
+    ts::QueryMatch match;
+    REQUIRE(cursor.nextMatch(match));
+    const std::size_t capacity = match.captures.capacity();
+    REQUIRE(cursor.nextMatch(match));
+    CHECK(match.captures.capacity() == capacity);
+    CHECK(json.text(match.captures[0].node) == "2");
+}
+
+TEST_CASE("QueryCursor match limit and start depth", "[query][cursor][limits]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    ts::QueryCursor    cursor;
+
+    SECTION("Match limit")
+    {
         cursor.setMatchLimit(1);
-        CHECK(cursor.getMatchLimit() == 1);
-
-        std::string complex_code = "[[[[[[[[[[1]]]]]]]]]]";
-        ts::Tree    complex_tree = parser.parseString(complex_code);
-
-        cursor.exec(query_complex, complex_tree.getRootNode());
-
-        ts::QueryMatch m;
-        std::uint32_t  count = 0;
-        while (cursor.nextMatch(m))
-        {
-            ++count;
-        }
-
-        CHECK(count == 6);
-        CHECK(cursor.didExceedMatchLimit() == true);
+        CHECK(cursor.getMatchLimit() == 1u);
+        const ts::Tree  nested = parser.parseString("[[[[[[[[[[1]]]]]]]]]]");
+        const ts::Query any(language, "(_ (_)) @match");
+        cursor.exec(any, nested.getRootNode());
+        CHECK(countMatches(cursor) == 6u);
+        CHECK(cursor.didExceedMatchLimit());
     }
 
-    SECTION("Byte Range")
+    SECTION("Start depth")
     {
-        bool ok = cursor.setByteRange({ 3, 8 });
+        const ts::Tree  flat = parser.parseString("[1, [2]]");
+        const ts::Query numbers(language, "(number) @n");
 
-        REQUIRE(ok == true);
+        // Depth 0: only patterns starting at the root node itself.
+        cursor.setMaxStartDepth(0);
+        cursor.exec(numbers, flat.getRootNode());
+        CHECK(countMatches(cursor) == 0u);
 
-        cursor.exec(query, tree.getRootNode());
+        cursor.resetMaxStartDepth();
+        cursor.exec(numbers, flat.getRootNode());
+        CHECK(countMatches(cursor) == 2u);
 
-        ts::QueryMatch m;
-        std::uint32_t  count = 0;
-        while (cursor.nextMatch(m))
-        {
-            ++count;
-        }
-        CHECK(count == 2);
+        // A deeply nested number is not found below depth 1.
+        const ts::Tree deep = parser.parseString("[[[[1]]]]");
+        cursor.setMaxStartDepth(1);
+        cursor.exec(numbers, deep.getRootNode());
+        CHECK(countMatches(cursor) == 0u);
     }
 }
 
-TEST_CASE("QueryCursor NextCapture", "[query][cursor]")
+TEST_CASE("QueryCursor byte and point ranges", "[query][cursor][range]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "{\"a\": 1}";
-    ts::Tree     tree = parser.parseString(code);
-
-    ts::Query       query(lang, "(pair key: (string) @k value: (number) @v)");
-    ts::QueryCursor cursor;
-    cursor.exec(query, tree.getRootNode());
-
-    SECTION("Iterate via captures")
-    {
-        ts::QueryMatch match;
-        std::uint32_t  capture_index;
-        std::uint32_t  count = 0;
-
-        while (cursor.nextCapture(match, capture_index))
-        {
-            ++count;
-            CHECK(match.captures[capture_index].node.isNull() == false);
-        }
-        CHECK(count == 2); // One @k and one @v
-    }
-}
-
-TEST_CASE("QueryCursor Progress Callback Accessor", "[query][cursor][options]")
-{
-    ts::QueryCursorOptions options;
-
-    SECTION("Default state has no callback")
-    {
-        CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
-    }
-
-    SECTION("Setting a callback makes it retrievable")
-    {
-        options.setProgressCallback([](ts::QueryCursorState *) { return false; });
-
-        REQUIRE(static_cast<bool>(options.getProgressCallback()));
-    }
-
-    SECTION("Setting an empty callback")
-    {
-        options.setProgressCallback([](ts::QueryCursorState *) { return false; });
-        REQUIRE(static_cast<bool>(options.getProgressCallback()));
-
-        options.setProgressCallback(ts::QueryCursorOptions::ProgressCallbackFunction{});
-        CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
-    }
-
-    SECTION("Constructor with callback")
-    {
-        ts::QueryCursorOptions opt_temp([](ts::QueryCursorState *) { return false; });
-        REQUIRE(static_cast<bool>(opt_temp.getProgressCallback()));
-    }
-}
-
-TEST_CASE("QueryCursor Progress Callback", "[query][cursor]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    // Large JSON to make cursor work
-    std::string code = "[";
-    for (std::uint32_t i = 0; i < 500; ++i)
-    {
-        code += "1,";
-    }
-    code += "1]";
-
-    ts::Tree        tree = parser.parseString(code);
-    ts::Query       query(lang, "(number) @n");
     ts::QueryCursor cursor;
 
-    std::uint32_t          progress_calls = 0;
-    ts::QueryCursorOptions options;
+    SECTION("Byte, point and containing ranges")
+    {
+        ts_test::JsonFixture json("[1, 2, 3, 4, 5]");
+        const ts::Query      numbers(json.language, "(number) @n");
 
+        // Matches intersecting bytes [3, 8): 2 and 3.
+        REQUIRE(cursor.setByteRange(ts::Extent<std::uint32_t>(3, 8)));
+        cursor.exec(numbers, json.root());
+        CHECK(countMatches(cursor) == 2u);
+        CHECK_FALSE(cursor.setByteRange(ts::Extent<std::uint32_t>(8, 3)));
+
+        REQUIRE(cursor.setByteRange(ts::Extent<std::uint32_t>(0, 0xFFFFFFFFu)));
+        REQUIRE(cursor.setPointRange(ts::Extent<ts::Point>(ts::Point(0, 0), ts::Point(0, 2))));
+        cursor.exec(numbers, json.root());
+        CHECK(countMatches(cursor) == 1u);
+
+        // Containing ranges only keep matches fully inside the range.
+        REQUIRE(cursor.setPointRange(ts::Extent<ts::Point>(ts::Point(0, 0), ts::Point(0xFFFFFFFFu, 0xFFFFFFFFu))));
+        const ts::Query array(json.language, "(array) @a");
+        REQUIRE(cursor.setContainingByteRange(ts::Extent<std::uint32_t>(0, 5)));
+        cursor.exec(array, json.root());
+        CHECK(countMatches(cursor) == 0u);
+        REQUIRE(cursor.setContainingByteRange(ts::Extent<std::uint32_t>(0, 0xFFFFFFFFu)));
+        REQUIRE(cursor.setContainingPointRange(ts::Extent<ts::Point>(ts::Point(0, 0), ts::Point(1, 0))));
+        cursor.exec(array, json.root());
+        CHECK(countMatches(cursor) == 1u);
+    }
+
+    SECTION("Point range over several lines")
+    {
+        // Two objects on different lines: only the first number is inside rows [0, 2).
+        ts_test::JsonFixture json("{\n\"a\": 1\n}\n{\n\"b\": 2\n}");
+        const ts::Query      numbers(json.language, "(number) @n");
+        REQUIRE(cursor.setPointRange(ts::Extent<ts::Point>(ts::Point(0, 0), ts::Point(2, 0))));
+        cursor.exec(numbers, json.root());
+        CHECK(countMatches(cursor) == 1u);
+    }
+}
+
+TEST_CASE("QueryCursor remove match", "[query][cursor]")
+{
+    ts_test::JsonFixture json("[1, 2]");
+    const ts::Query      query(json.language, "(number) @n");
+    ts::QueryCursor      cursor;
+
+    cursor.exec(query, json.root());
+    ts::QueryMatch match;
+    REQUIRE(cursor.nextMatch(match));
+    CHECK_NOTHROW(cursor.removeMatch(match.id));
+    CHECK(cursor.nextMatch(match));
+    CHECK(cursor.raw() != nullptr);
+}
+
+TEST_CASE("QueryCursorOptions progress callback accessors", "[query][cursor][options]")
+{
+    ts::QueryCursorOptions options;
     CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
 
-    options.setProgressCallback(
-            [&](ts::QueryCursorState *state)
-            {
-                ++progress_calls;
-                CHECK(state->current_byte_offset <= code.size());
-                return false; // Continue
-            });
+    options.setProgressCallback([](ts::QueryCursorState *) { return false; });
+    CHECK(static_cast<bool>(options.getProgressCallback()));
 
-    REQUIRE(static_cast<bool>(options.getProgressCallback()));
+    options.setProgressCallback(ts::QueryCursorOptions::ProgressCallbackFunction());
+    CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
 
-    SECTION("Execution with progress")
+    const ts::QueryCursorOptions constructed([](ts::QueryCursorState *) { return false; });
+    CHECK(static_cast<bool>(constructed.getProgressCallback()));
+}
+
+TEST_CASE("QueryCursor progress callback and cancellation", "[query][cursor][options]")
+{
+    ts_test::JsonFixture json(ts_test::bigJsonArray(2000));
+    const ts::Query      query(json.language, "(number) @n");
+    ts::QueryCursor      cursor;
+
+    SECTION("The cursor owns the callback of the execution")
     {
-#if CPP_TS_TEST_HAS_CXX17
-        cursor.exec(query, tree.getRootNode(), options);
-#else
-        cursor.exec(query, tree.getRootNode(), &options);
-#endif // CPP_TS_TEST_HAS_CXX17
-        ts::QueryMatch m;
-        std::uint32_t  matches = 0;
-        while (cursor.nextMatch(m))
+        std::shared_ptr<std::uint32_t> calls = std::make_shared<std::uint32_t>(0);
         {
-            ++matches;
+            // tree-sitter keeps a pointer to the options for the whole execution. The options object (and the
+            // callback stored in it) dies here, before any match is pulled: the cursor must keep its own copy.
+            ts::QueryCursorOptions options(
+                    [calls, &json](ts::QueryCursorState *state) -> bool
+                    {
+                        ++*calls;
+                        CHECK(state->current_byte_offset <= json.source.size());
+                        return false;
+                    });
+            cursor.exec(query, json.root(), options);
         }
+        CHECK(countMatches(cursor) == 2000u);
+        CHECK(*calls > 0u);
+        CHECK_FALSE(cursor.wasCancelled());
+    }
 
-        CHECK(progress_calls > 0);
-        CHECK(matches != progress_calls);
-        CHECK(matches > progress_calls);
-        CHECK(static_cast<bool>(options.getProgressCallback()));
+    SECTION("Returning true cancels the execution")
+    {
+        // The matches produced are a prefix of the full result.
+        cursor.exec(query, json.root(), ts::QueryCursorOptions([](ts::QueryCursorState *) { return true; }));
+        CHECK(countMatches(cursor) < 2000u);
+        CHECK(cursor.wasCancelled());
+
+        // A new execution clears the cancellation.
+        cursor.exec(query, json.root());
+        CHECK_FALSE(cursor.wasCancelled());
+        CHECK(countMatches(cursor) == 2000u);
+    }
+
+    SECTION("Exceptions of the callback are rethrown")
+    {
+        const ts::Query pairs(json.language, "(pair key: (string) @key)");
+        cursor.exec(pairs,
+                    json.root(),
+                    ts::QueryCursorOptions([](ts::QueryCursorState *) -> bool { throw std::runtime_error("query"); }));
+        CHECK_THROWS_WITH(countMatches(cursor), "query");
+        CHECK(cursor.wasCancelled());
+
+        // A new execution clears the cancellation.
+        cursor.exec(pairs, json.root());
+        CHECK_FALSE(cursor.wasCancelled());
+        CHECK(countMatches(cursor) > 0u);
     }
 }
 
-TEST_CASE("QueryCursor Remove Match", "[query][cursor]")
+TEST_CASE("QueryCursor move", "[query][cursor][lifecycle]")
 {
-    ts::Language    lang(tree_sitter_json());
-    ts::Parser      parser(lang);
-    ts::Tree        tree = parser.parseString("[1, 2]");
-    ts::Query       query(lang, "(number) @n");
+    ts_test::JsonFixture json("[1, 2]");
+    const ts::Query      query(json.language, "(number) @n");
+
     ts::QueryCursor cursor;
-    cursor.exec(query, tree.getRootNode());
-
-    SECTION("Remove active match")
-    {
-        ts::QueryMatch m;
-        REQUIRE(cursor.nextMatch(m));
-        std::uint32_t first_id = m.id;
-
-        cursor.removeMatch(first_id);
-
-        CHECK(cursor.nextMatch(m));
-    }
+    cursor.exec(query, json.root());
+    ts::QueryCursor moved(std::move(cursor));
+    CHECK(countMatches(moved) == 2u);
 }
-
-TEST_CASE("Query Exception Handling and Limits", "[query][exceptions]")
-{
-    ts::Language lang(tree_sitter_json());
-    std::string  valid_query = "(number) @num";
-
-    SECTION("Invalid language throws runtime_error")
-    {
-        ts::Language invalid_lang(nullptr);
-        CHECK_THROWS_AS(ts::Query(invalid_lang, valid_query), std::runtime_error);
-    }
-
-#if SIZE_MAX > UINT32_MAX
-    SECTION("Exceeding 4GB source size limit throws length_error")
-    {
-        // Fake a massive string view to trigger the overflow protection
-        const char           *fake_str      = "fake";
-        constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
-
-        const ts::StringView huge_view(fake_str, overflow_size);
-
-        CHECK_THROWS_AS(ts::Query(lang, huge_view), std::length_error);
-    }
-
-    SECTION("Exceeding 4GB capture name limit in disableCapture throws length_error")
-    {
-        ts::Query             query(lang, valid_query);
-        const char           *fake_str      = "fake";
-        constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
-
-        const ts::StringView huge_view(fake_str, overflow_size);
-
-        CHECK_THROWS_AS(query.disableCapture(huge_view), std::length_error);
-    }
-#endif // SIZE_MAX > UINT32_MAX
-}
-
-TEST_CASE("QueryCursor Depth Limits", "[query][cursor]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    // Deeply nested array
-    std::string     code = "[[[[1]]]]";
-    ts::Tree        tree = parser.parseString(code);
-    ts::Query       query(lang, "(number) @n");
-    ts::QueryCursor cursor;
-
-    SECTION("Restrict search depth")
-    {
-        // Number is deeply nested, so restricting max start depth to 1 should prevent matching
-        cursor.setMaxStartDepth(1);
-        cursor.exec(query, tree.getRootNode());
-
-        ts::QueryMatch m;
-        CHECK_FALSE(cursor.nextMatch(m));
-    }
-
-    SECTION("Reset search depth allows matching again")
-    {
-        cursor.setMaxStartDepth(1);
-        cursor.resetMaxStartDepth(); // Removes the limit
-        cursor.exec(query, tree.getRootNode());
-
-        ts::QueryMatch m;
-        CHECK(cursor.nextMatch(m));
-    }
-}
-
-TEST_CASE("QueryCursor Advanced Ranges", "[query][cursor][range]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    // Two objects on different lines
-    std::string     code = "{\n\"a\": 1\n}\n{\n\"b\": 2\n}";
-    ts::Tree        tree = parser.parseString(code);
-    ts::Query       query(lang, "(number) @n");
-    ts::QueryCursor cursor;
-
-    SECTION("Point Range restriction")
-    {
-        // Restrict to the first line (skipping the second object)
-        ts::Extent<ts::Point> point_range{ { 0, 0 }, { 2, 0 } };
-        bool                  ok = cursor.setPointRange(point_range);
-        REQUIRE(ok);
-
-        cursor.exec(query, tree.getRootNode());
-        ts::QueryMatch m;
-        std::uint32_t  count = 0;
-        while (cursor.nextMatch(m))
-        {
-            ++count;
-        }
-
-        // Should only find '1', not '2'
-        CHECK(count == 1);
-    }
-
-    SECTION("Containing Byte and Point Ranges")
-    {
-        // Note: These methods return true if the operation succeeds in the C API.
-        // We verify that the API accepts valid Extent structs.
-        ts::Extent<std::uint32_t> byte_range{ 0, 5 };
-        CHECK(cursor.setContainingByteRange(byte_range));
-
-        ts::Extent<ts::Point> pt_range{ { 0, 0 }, { 0, 5 } };
-        CHECK(cursor.setContainingPointRange(pt_range));
-    }
-}
-
-#if CPP_TS_TEST_HAS_CXX23
-TEST_CASE("Query C++23 Factory", "[query][cxx23]")
-{
-    ts::Language lang(tree_sitter_json());
-    std::string  valid_source = "((number) @num)";
-
-    using Catch::Matchers::ContainsSubstring;
-
-    SECTION("Static factory create() success")
-    {
-        auto result = ts::Query::create(lang, valid_source);
-        REQUIRE(result.has_value());
-
-        ts::Query query = std::move(result.value());
-        CHECK(query.getCaptureCount() == 1);
-        CHECK(query.getCaptureNameForID(0).compare("num") == 0);
-    }
-
-    SECTION("Static factory create() invalid syntax error")
-    {
-        // Missing closing parenthesis
-        std::string invalid_source = "((number) @num";
-        auto        result         = ts::Query::create(lang, invalid_source);
-
-        REQUIRE_FALSE(result.has_value());
-        // Verify that error message contains information about the problem
-        CHECK_THAT(result.error(), ContainsSubstring("Syntax"));
-    }
-
-    SECTION("Static factory create() invalid node type")
-    {
-        std::string invalid_source = "((non_existent_node) @tag)";
-        auto        result         = ts::Query::create(lang, invalid_source);
-
-        REQUIRE_FALSE(result.has_value());
-        CHECK_THAT(result.error(), ContainsSubstring("Node"));
-    }
-
-    SECTION("Static factory create() with invalid language")
-    {
-        ts::Language invalid_lang(nullptr);
-        auto         result = ts::Query::create(invalid_lang, valid_source);
-
-        REQUIRE_FALSE(result.has_value());
-        CHECK_THAT(result.error(), ContainsSubstring("Language"));
-    }
-}
-#endif // CPP_TS_TEST_HAS_CXX23

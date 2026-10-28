@@ -1,346 +1,220 @@
-#include "pch.hpp"
+// Tree: validity, copy/move, root with offset, edits, incremental parsing, ranges and DOT output.
 
-// cpp-tree-sitter
-#include <cpp-tree-sitter.hpp>
-
-// Catch2
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "common.hpp"
 
 // STL
-#include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
-#include <iterator>
-#include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
-extern "C" const TSLanguage *tree_sitter_json();
-
-TEST_CASE("Tree Incremental Parsing (Editing)", "[parser][tree]")
+TEST_CASE("Invalid tree returns neutral values", "[tree][null]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
+    ts::Tree tree(nullptr);
 
-    std::string code = "[1, 2, 3]";
-    ts::Tree    tree = parser.parseString(code);
-    ts::Node    root = tree.getRootNode();
+    CHECK_FALSE(tree.isValid());
+    CHECK_FALSE(tree.hasError());
+    CHECK(tree.getRootNode().isNull());
+    CHECK(tree.getRootNodeWithOffset(5, ts::Point(1, 0)).isNull());
+    CHECK_FALSE(tree.getLanguage().isValid());
+    CHECK(tree.getIncludedRanges().empty());
+    CHECK(static_cast<TSTree *>(tree) == nullptr);
+    CHECK_FALSE(tree.copy().isValid());
+    CHECK_THROWS_AS(tree.edit(ts::InputEdit()), std::logic_error);
 
-    SECTION("Edit and Re-parse")
+    // If either tree is invalid there are no changed ranges.
+    ts_test::JsonFixture json("{}");
+    CHECK(ts::Tree::getChangedRanges(tree, tree).empty());
+    CHECK(ts::Tree::getChangedRanges(tree, json.tree).empty());
+    CHECK(ts::Tree::getChangedRanges(json.tree, tree).empty());
+}
+
+TEST_CASE("Tree attributes", "[tree]")
+{
+    ts_test::JsonFixture json("[1, 2]");
+
+    CHECK(json.tree.isValid());
+    CHECK_FALSE(json.tree.hasError());
+    CHECK(json.tree.getRootNode().getType() == "document");
+    CHECK(static_cast<const TSLanguage *>(json.tree.getLanguage()) == static_cast<const TSLanguage *>(json.language));
+    CHECK(ts_tree_language(json.tree) == static_cast<const TSLanguage *>(json.language));
+
+    ts_test::JsonFixture broken("[1, ]");
+    CHECK(broken.tree.hasError());
+}
+
+TEST_CASE("Tree copy and move", "[tree][lifecycle]")
+{
+    ts_test::JsonFixture json("[1, 2]");
+
+    // Copies are independent trees (ts_tree_copy) with the same content.
+    ts::Tree copy(json.tree);
+    CHECK(copy.isValid());
+    CHECK(static_cast<TSTree *>(copy) != static_cast<TSTree *>(json.tree));
+    CHECK(copy.getRootNode().getDescendantsCount() == json.root().getDescendantsCount());
+
+    ts::Tree assigned(nullptr);
+    assigned = json.tree;
+    CHECK(assigned.isValid());
+    CHECK(assigned.getRootNode().getSourceText(json.source) == "[1, 2]");
+
+    ts::Tree explicit_copy = json.tree.copy();
+    CHECK(explicit_copy.isValid());
+
+    // Self-assignment keeps the tree.
+    ts::Tree *self = &assigned;
+    assigned       = *self;
+    CHECK(assigned.isValid());
+    CHECK(assigned.getRootNode().getType() == "document");
+
+    // Moves transfer the tree.
+    TSTree  *raw = copy;
+    ts::Tree moved(std::move(copy));
+    CHECK(static_cast<TSTree *>(moved) == raw);
+    CHECK_FALSE(copy.isValid());
+
+    ts::Tree move_assigned(nullptr);
+    move_assigned = std::move(moved);
+    CHECK(static_cast<TSTree *>(move_assigned) == raw);
+    CHECK_FALSE(moved.isValid());
+}
+
+TEST_CASE("Tree root node with offset", "[tree]")
+{
+    SECTION("Shifted root")
     {
-        std::string new_code = "[1, 20, 3]";
+        ts_test::JsonFixture json("[1]");
+        const ts::Node       shifted = json.tree.getRootNodeWithOffset(10, ts::Point(2, 0));
 
-        ts::InputEdit edit{
-            4,        // start_byte
-            5,        // old_end_byte
-            6,        // new_end_byte
-            { 0, 4 }, // start_point
-            { 0, 5 }, // old_end_point
-            { 0, 6 }  // new_end_point
-        };
+        CHECK(shifted.getByteRange() == ts::Extent<std::uint32_t>(10, 13));
+        CHECK(shifted.getPointRange().start == ts::Point(2, 0));
+        CHECK(shifted.getNamedChild(0).getType() == "array");
+    }
 
-        tree.edit(edit);
-#if CPP_TS_TEST_HAS_CXX17
-        ts::Tree new_tree = parser.parseString(new_code, tree);
-#else
-        ts::Tree new_tree = parser.parseString(new_code, &tree);
-#endif // CPP_TS_TEST_HAS_CXX17
-
-        CHECK_FALSE(new_tree.hasError());
-        ts::Node new_root   = new_tree.getRootNode();
-        ts::Node array_node = new_root.getNamedChild(0);
-        ts::Node second_num = array_node.getNamedChild(1);
-
-        CHECK(second_num.getType().compare("number") == 0);
-        CHECK(second_num.getSourceText(new_code) == "20");
+    SECTION("Leading whitespace")
+    {
+        // The root starts at the first token.
+        ts_test::JsonFixture json("  [1]");
+        CHECK(json.root().getByteRange().start == 2u);
+        CHECK(json.root().getType() == "document");
     }
 }
 
-TEST_CASE("Tree Lifecycle and Operators", "[tree]")
+TEST_CASE("Tree edit and incremental parsing", "[tree][edit]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "[1, 2]";
-    ts::Tree     tree = parser.parseString(code);
-
-    SECTION("Copy constructor and copy method")
+    SECTION("Insertion")
     {
-        ts::Tree tree_copy(tree);
-        CHECK(tree_copy.getRootNode().getType().compare("document") == 0);
+        ts_test::JsonFixture json("[1, 2]");
 
-        ts::Tree tree_copy2 = tree.copy();
-        CHECK(tree_copy2.getRootNode().getType().compare("document") == 0);
-    }
+        // "[1, 2]" -> "[1, 2, 3]"
+        const std::string   updated = "[1, 2, 3]";
+        const ts::InputEdit edit(5, 5, 8, ts::Point(0, 5), ts::Point(0, 5), ts::Point(0, 8));
+        json.tree.edit(edit);
+        CHECK(json.tree.getRootNode().hasChanges());
 
-    SECTION("Assignment operators")
-    {
-        ts::Tree tree2 = parser.parseString("null");
-        tree2          = tree; // Copy assignment
-        CHECK(tree2.getRootNode().getSourceText(code).find("[1, 2]") != std::string::npos);
+        ts::Tree reparsed = json.parser.parseString(updated, json.tree);
+        REQUIRE(reparsed.isValid());
+        CHECK(reparsed.getRootNode().getNamedChild(0).getNamedChildCount() == 3u);
 
-        ts::Tree tree3 = std::move(tree2); // Move assignment
-        CHECK_FALSE(tree3.getRootNode().isNull());
-    }
-
-    SECTION("C-API Conversion")
-    {
-        const TSTree *raw = tree; // TSTree* operator
-        REQUIRE(raw != nullptr);
-        CHECK(ts_tree_language(raw) == lang.operator const TSLanguage *());
-    }
-}
-
-TEST_CASE("Tree Root and Offsets", "[tree]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "  [1]";
-    ts::Tree     tree = parser.parseString(code);
-
-    SECTION("Standard root node")
-    {
-        ts::Node root = tree.getRootNode();
-        CHECK(root.getByteRange().start == 2); // Because of spaces
-        CHECK(root.getType().compare("document") == 0);
-    }
-
-    SECTION("Root node with offset")
-    {
-        ts::Node offset_root = tree.getRootNodeWithOffset(2, { 0, 2 });
-
-        ts::Node array = offset_root.getNamedChild(0);
-        CHECK(array.getType().compare("array") == 0);
-    }
-}
-
-TEST_CASE("Tree Ranges and Changes", "[tree]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    SECTION("Included Ranges")
-    {
-        std::string code = "[1, 2]";
-        ts::Tree    tree = parser.parseString(code);
-
-        std::vector<ts::Range> ranges = tree.getIncludedRanges();
-        REQUIRE_FALSE(ranges.empty());
-
-        CHECK(ranges[0].byte.start == 0);
-        CHECK(ranges[0].byte.end == std::numeric_limits<std::uint32_t>::max());
-    }
-
-    SECTION("Changed Ranges after edit")
-    {
-        std::string code1 = "[1, 2]";
-        std::string code2 = "[1, 20]";
-
-        ts::Tree tree1 = parser.parseString(code1);
-        ts::Tree tree2 = parser.parseString(code1);
-
-        // Edit '2' to '20' (4 bytes)
-        ts::InputEdit edit{
-            4,        5,        6,       // bytes: start, old_end, new_end
-            { 0, 4 }, { 0, 5 }, { 0, 6 } // points
-        };
-
-        tree2.edit(edit);
-#if CPP_TS_TEST_HAS_CXX17
-        ts::Tree tree3 = parser.parseString(code2, tree2);
-#else
-        ts::Tree tree3 = parser.parseString(code2, &tree2);
-#endif // CPP_TS_TEST_HAS_CXX17
-
-        std::vector<ts::Range> changed = ts::Tree::getChangedRanges(tree1, tree3);
-
+        const std::vector<ts::Range> changed = ts::Tree::getChangedRanges(json.tree, reparsed);
         REQUIRE_FALSE(changed.empty());
+        CHECK(changed.front().byte.start <= 5u);
+        CHECK(changed.back().byte.end >= 8u);
+    }
 
-        CHECK(changed[0].byte.start <= 5);
-        CHECK(changed[0].byte.end >= 7);
+    SECTION("Replacement")
+    {
+        ts_test::JsonFixture json("[1, 2, 3]");
+        const ts::Tree       original = json.tree.copy();
+
+        // "[1, 2, 3]" -> "[1, 20, 3]"
+        const std::string updated = "[1, 20, 3]";
+        json.tree.edit(ts::InputEdit(4, 5, 6, ts::Point(0, 4), ts::Point(0, 5), ts::Point(0, 6)));
+        const ts::Tree reparsed = json.parser.parseString(updated, json.tree);
+
+        CHECK_FALSE(reparsed.hasError());
+        const ts::Node second = reparsed.getRootNode().getNamedChild(0).getNamedChild(1);
+        CHECK(second.getType() == "number");
+        CHECK(second.getSourceText(updated) == "20");
+
+        const std::vector<ts::Range> changed = ts::Tree::getChangedRanges(original, reparsed);
+        REQUIRE_FALSE(changed.empty());
+        CHECK(changed[0].byte.start <= 5u);
+        CHECK(changed[0].byte.end >= 6u);
+    }
+
+    SECTION("Invalid edit")
+    {
+        ts_test::JsonFixture json("[1, 2]");
+        const ts::InputEdit  invalid(5, 2, 8, ts::Point(0, 5), ts::Point(0, 2), ts::Point(0, 8));
+        CHECK_THROWS_AS(json.tree.edit(invalid), std::invalid_argument);
+        CHECK_FALSE(json.tree.getRootNode().hasChanges());
+    }
+
+    SECTION("No edits, no changed ranges")
+    {
+        // Different tree instances without recorded edits.
+        ts_test::JsonFixture first("{\"key\": \"value\"}");
+        ts_test::JsonFixture second("{\"key\": \"value\"}");
+        CHECK(ts::Tree::getChangedRanges(first.tree, second.tree).empty());
     }
 }
 
-TEST_CASE("Tree Error and Language", "[tree]")
+TEST_CASE("Tree included ranges", "[tree][range]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
+    ts_test::JsonFixture         json("[1]");
+    const std::vector<ts::Range> ranges = json.tree.getIncludedRanges();
 
-    SECTION("hasError flag")
-    {
-        ts::Tree valid_tree = parser.parseString("[1]");
-        CHECK_FALSE(valid_tree.hasError());
-
-        ts::Tree invalid_tree = parser.parseString("[1, ]");
-        CHECK(invalid_tree.hasError());
-    }
-
-    SECTION("getLanguage")
-    {
-        ts::Tree         tree      = parser.parseString("{}");
-        ts::LanguageView tree_lang = tree.getLanguage();
-        CHECK(tree_lang.operator const TSLanguage *() == lang.operator const TSLanguage *());
-    }
+    // Without restrictions the tree includes the whole document.
+    REQUIRE(ranges.size() == 1u);
+    CHECK(ranges[0].byte.start == 0u);
+    CHECK(ranges[0].byte.end == 0xFFFFFFFFu);
 }
 
-TEST_CASE("Tree Debugging", "[tree]")
+TEST_CASE("Tree DOT graph output", "[tree][debug]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    ts::Tree     tree = parser.parseString("true");
+    ts_test::JsonFixture json("{\"test\": 123}");
 
-    SECTION("printDotGraph to file")
+    SECTION("To a FILE")
     {
-        const char *temp_file = "tree_graph.dot";
+        const char *path = "cpp-tree-sitter-tree-file.dot";
 #if defined(_WIN32)
-        FILE *f = nullptr;
-        fopen_s(&f, temp_file, "w");
+        std::FILE *file = nullptr;
+        fopen_s(&file, path, "w");
 #else
-        FILE *f = fopen(temp_file, "w");
+        std::FILE *file = std::fopen(path, "w");
 #endif // defined(_WIN32)
-        REQUIRE(f != nullptr);
+        REQUIRE(file != nullptr);
+        json.tree.printDotGraph(file);
+        std::fclose(file);
 
-        tree.printDotGraph(f);
-        fclose(f);
-
-        // Check if file is not empty
-#if defined(_WIN32)
-        FILE *f_check = nullptr;
-        fopen_s(&f_check, temp_file, "r");
-#else
-        FILE *f_check = fopen(temp_file, "r");
-#endif // defined(_WIN32)
-        REQUIRE(f_check != nullptr);
-
-        fseek(f_check, 0, SEEK_END);
-        long size = ftell(f_check);
-        fclose(f_check);
-
-        CHECK(size > 0);
-        std::remove(temp_file);
-    }
-}
-
-TEST_CASE("Tree printDotGraph by path", "[tree][debug]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code     = "{\"test\": 123}";
-    ts::Tree     tree     = parser.parseString(code);
-    std::string  filename = "tree_path_graph.dot";
-
-    SECTION("Generate DOT graph via filename")
-    {
-        CHECK_NOTHROW(tree.printDotGraph(filename));
-
-        std::ifstream f(filename);
-        REQUIRE(f.is_open());
-
-        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-
-        CHECK(content.find("digraph") != std::string::npos);
-        CHECK(content.find("object") != std::string::npos);
-        CHECK(content.find("pair") != std::string::npos);
-
-        f.close();
-
-        CHECK(std::remove(filename.c_str()) == 0);
-    }
-}
-
-TEST_CASE("Tree Invalid State Handling", "[tree][exceptions]")
-{
-    // Create an invalid tree by passing nullptr
-    ts::Tree invalid_tree(nullptr);
-
-    SECTION("Validation flags and basic getters")
-    {
-        CHECK_FALSE(invalid_tree.isValid());
-        CHECK_FALSE(invalid_tree.hasError());
-        CHECK(invalid_tree.getLanguage().operator const TSLanguage *() == nullptr);
-        CHECK(invalid_tree.operator TSTree *() == nullptr);
+        const std::string content = ts_test::readFile(path);
+        std::remove(path);
+        CHECK(ts_test::contains(content, "digraph"));
     }
 
-    SECTION("Node access on invalid tree returns null nodes")
+    SECTION("To a path")
     {
-        CHECK(invalid_tree.getRootNode().isNull());
-        CHECK(invalid_tree.getRootNodeWithOffset(0, { 0, 0 }).isNull());
+        const std::string path = "cpp-tree-sitter-tree-path.dot";
+        CHECK_NOTHROW(json.tree.printDotGraph(path));
+
+        const std::string content = ts_test::readFile(path.c_str());
+        CHECK(std::remove(path.c_str()) == 0);
+        CHECK(ts_test::contains(content, "digraph"));
+        CHECK(ts_test::contains(content, "object"));
+        CHECK(ts_test::contains(content, "pair"));
     }
 
-    SECTION("Editing an invalid tree throws logic_error")
+    SECTION("Null files and invalid trees are ignored")
     {
-        ts::InputEdit dummy_edit{};
-        // The edit method has an explicit guard against modifying an invalid tree
-        CHECK_THROWS_AS(invalid_tree.edit(dummy_edit), std::logic_error);
-    }
+        CHECK_NOTHROW(json.tree.printDotGraph(static_cast<std::FILE *>(nullptr)));
 
-    SECTION("Ranges on invalid tree return empty vectors")
-    {
-        CHECK(invalid_tree.getIncludedRanges().empty());
-
-        ts::Language lang(tree_sitter_json());
-        ts::Parser   parser(lang);
-        ts::Tree     valid_tree = parser.parseString("{}");
-
-        // If either tree is invalid, getChangedRanges should safely return an empty vector
-        CHECK(ts::Tree::getChangedRanges(invalid_tree, valid_tree).empty());
-        CHECK(ts::Tree::getChangedRanges(valid_tree, invalid_tree).empty());
-        CHECK(ts::Tree::getChangedRanges(invalid_tree, invalid_tree).empty());
-    }
-
-    SECTION("Debugging methods on invalid tree do not crash")
-    {
-        // These should hit the early return guards and do nothing without throwing
-        CHECK_NOTHROW(invalid_tree.printDotGraph(-1));
-        CHECK_NOTHROW(invalid_tree.printDotGraph("dummy_output.dot"));
-
-        FILE *dummy_file = nullptr;
-        CHECK_NOTHROW(invalid_tree.printDotGraph(dummy_file));
-    }
-}
-
-TEST_CASE("Tree Lifecycle Edge Cases", "[tree][lifecycle]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "[1, 2, 3]";
-    ts::Tree     tree = parser.parseString(code);
-
-    SECTION("Self Assignment")
-    {
-        // Suppress compiler warnings about self-assignment by using a pointer
-        ts::Tree *ptr_tree = &tree;
-        tree               = *ptr_tree;
-
-        CHECK(tree.isValid());
-        CHECK(tree.getRootNode().getType().compare("document") == 0);
-    }
-
-    SECTION("Copying an invalid tree results in an invalid tree")
-    {
-        ts::Tree invalid_tree(nullptr);
-        ts::Tree invalid_copy = invalid_tree.copy();
-
-        CHECK_FALSE(invalid_copy.isValid());
-    }
-}
-
-TEST_CASE("Tree Unchanged Ranges", "[tree]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "{\"key\": \"value\"}";
-
-    SECTION("Changed ranges are empty if no edits occurred")
-    {
-        ts::Tree tree1 = parser.parseString(code);
-        ts::Tree tree2 = parser.parseString(code);
-
-        // Even though they are different tree instances, no structural edits
-        // were recorded, so changed ranges should be empty.
-        std::vector<ts::Range> changed = ts::Tree::getChangedRanges(tree1, tree2);
-        CHECK(changed.empty());
+        ts::Tree invalid(nullptr);
+        CHECK_NOTHROW(invalid.printDotGraph(static_cast<std::FILE *>(nullptr)));
+        CHECK_NOTHROW(invalid.printDotGraph(-1));
+        CHECK_NOTHROW(invalid.printDotGraph("cpp-tree-sitter-not-written.dot"));
+        CHECK(ts_test::readFile("cpp-tree-sitter-not-written.dot").empty());
     }
 }

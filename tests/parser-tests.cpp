@@ -1,503 +1,580 @@
-#include "pch.hpp"
+// Parser and Input: languages, parse methods, callbacks (read, decode, logger, progress), included ranges,
+// incremental parsing, debugging output and lifecycle.
 
-// cpp-tree-sitter
-#include <cpp-tree-sitter.hpp>
-
-// Catch2
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include "common.hpp"
 
 // STL
-#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
-#if CPP_TS_TEST_HAS_CXX17
-#include <string_view>
-#endif // CPP_TS_TEST_HAS_CXX17
-
-#if CPP_TS_TEST_HAS_CXX20
-#include <span>
-#endif // CPP_TS_TEST_HAS_CXX20
-
-#if CPP_TS_TEST_HAS_CXX23
-#include <expected>
-#endif // CPP_TS_TEST_HAS_CXX23
-
-extern "C" const TSLanguage *tree_sitter_json();
-
-TEST_CASE("Parser and Tree lifecycle", "[parser]")
+namespace
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    std::string code = R"({"key": [1, 2, null]})";
-
-    SECTION("Parsing valid code")
+    ts::Range bytes(std::uint32_t start, std::uint32_t end)
     {
-        ts::Tree tree = parser.parseString(code);
-        ts::Node root = tree.getRootNode();
-
-        CHECK_FALSE(root.isNull());
-        CHECK(root.getType().compare("document") == 0);
-        CHECK_FALSE(tree.hasError());
+        return ts::Range(ts::Extent<ts::Point>(ts::Point(0, start), ts::Point(0, end)),
+                         ts::Extent<std::uint32_t>(start, end));
     }
 
-    SECTION("Handling syntax errors")
+    std::FILE *openForWriting(const char *path)
     {
-        ts::Tree tree = parser.parseString("{ \"key\": }"); // Error: No value
+#if defined(_WIN32)
+        std::FILE *file = nullptr;
+        fopen_s(&file, path, "w");
+        return file;
+#else
+        return std::fopen(path, "w");
+#endif // defined(_WIN32)
+    }
+} // namespace
+
+TEST_CASE("Parser language management", "[parser]")
+{
+    const ts::Language language(tree_sitter_json());
+
+    SECTION("Parser without a language")
+    {
+        ts::Parser empty;
+        CHECK_FALSE(empty.hasLanguage());
+        CHECK_FALSE(empty.getCurrentLanguage().isValid());
+        CHECK(empty.raw() != nullptr);
+
+        CHECK_THROWS_AS(empty.parseString("{}"), std::logic_error);
+        CHECK_THROWS_AS(empty.parseStringEncoded("{}", ts::InputEncoding::UTF8), std::logic_error);
+        const std::string source = "{}";
+        ts::Input         input(ts_test::ChunkedReader{ &source, 64 }, ts::InputEncoding::UTF8);
+        CHECK_THROWS_AS(empty.parse(input), std::logic_error);
+    }
+
+    SECTION("Assigning and clearing the language")
+    {
+        ts::Parser parser;
+        CHECK(parser.setLanguage(language));
+        CHECK(parser.hasLanguage());
+        CHECK(static_cast<const TSLanguage *>(parser.getCurrentLanguage())
+              == static_cast<const TSLanguage *>(language));
+        CHECK(parser.getCurrentLanguage().getSymbolsCount() == language.getView().getSymbolsCount());
+
+        // reset() keeps the language.
+        parser.reset();
+        CHECK(parser.hasLanguage());
+
+        // Assigning an invalid language clears the language.
+        CHECK(parser.setLanguage(ts::LanguageView()));
+        CHECK_FALSE(parser.hasLanguage());
+    }
+
+    SECTION("Constructor")
+    {
+        const ts::Parser parser(language);
+        CHECK(parser.hasLanguage());
+        CHECK_THROWS_AS(ts::Parser(ts::LanguageView()), std::runtime_error);
+    }
+}
+
+TEST_CASE("Parser parses strings", "[parser]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+
+    SECTION("Valid code")
+    {
+        const ts::Tree tree = parser.parseString("{\"key\": [1, 2, null]}");
+        REQUIRE(tree.isValid());
+        CHECK_FALSE(tree.hasError());
+        CHECK(tree.getRootNode().getType() == "document");
+        CHECK(tree.getRootNode().getNamedChild(0).getType() == "object");
+    }
+
+    SECTION("Syntax errors")
+    {
+        const ts::Tree tree = parser.parseString("{ \"key\": }"); // no value
+        REQUIRE(tree.isValid());
         CHECK(tree.hasError());
     }
-}
 
-TEST_CASE("Parser Logging", "[parser][debug]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    std::vector<std::string> log_messages;
-
-    parser.setLogger([&](ts::LogType, const char *message) { log_messages.push_back(message); });
-
-    ts::Tree tree = parser.parseString("[1]");
-
-    CHECK_FALSE(log_messages.empty());
-
-    parser.removeLogger();
-    std::size_t count_after_removal = log_messages.size();
-    tree                            = parser.parseString("[1, 2]");
-
-    CHECK(log_messages.size() == count_after_removal);
-}
-
-TEST_CASE("Parser Progress Callback Accessor", "[parser][options]")
-{
-    ts::ParseOptions options;
-
-    SECTION("Default state has no callback")
+    SECTION("Empty sources")
     {
-        CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
-    }
-
-    SECTION("Setting a callback makes it retrievable")
-    {
-        options.setProgressCallback([](ts::ParseState *) { return false; });
-
-        REQUIRE(static_cast<bool>(options.getProgressCallback()));
-    }
-
-    SECTION("Setting an empty callback")
-    {
-        options.setProgressCallback([](ts::ParseState *) { return false; });
-        REQUIRE(static_cast<bool>(options.getProgressCallback()));
-
-        options.setProgressCallback(ts::ParseOptions::ProgressCallbackFunction{});
-        CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
-    }
-
-    SECTION("Constructor with callback")
-    {
-        ts::ParseOptions opt_temp([](ts::ParseState *) { return false; });
-        REQUIRE(static_cast<bool>(opt_temp.getProgressCallback()));
+        CHECK(parser.parseString("").isValid());
+        // A default-constructed view has a null data() pointer, which must not reach the C API.
+        CHECK(parser.parseString(ts::StringView()).isValid());
     }
 }
 
-TEST_CASE("Parser Progress Callback", "[parser]")
+TEST_CASE("Parser parses encoded strings", "[parser][encoding]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
 
-    std::uint32_t    calls = 0;
-    ts::ParseOptions options;
-
-    CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
-
-    options.setProgressCallback(
-            [&](ts::ParseState *)
-            {
-                ++calls;
-                return false;
-            });
-
-    REQUIRE(static_cast<bool>(options.getProgressCallback()));
-
-    // We are generating large, deeply nested JSON that will force the parser to do a lot of work.
-    std::string code = "[";
-    for (std::uint32_t i = 0; i < 1000; ++i)
+    SECTION("UTF-16 little and big endian")
     {
-        code += "[";
+        // "[1]" in UTF-16 little and big endian.
+        const std::string utf16le("[\0"
+                                  "1\0"
+                                  "]\0",
+                                  6);
+        const std::string utf16be("\0["
+                                  "\0"
+                                  "1"
+                                  "\0]",
+                                  6);
+
+        const ts::Tree little = parser.parseStringEncoded(utf16le, ts::InputEncoding::UTF16LE);
+        CHECK_FALSE(little.hasError());
+        CHECK(little.getRootNode().getNamedChild(0).getType() == "array");
+
+        const ts::Tree big = parser.parseStringEncoded(utf16be, ts::InputEncoding::UTF16BE);
+        CHECK_FALSE(big.hasError());
+        CHECK(big.getRootNode().getNamedChild(0).getNamedChildCount() == 1u);
     }
-    for (std::uint32_t i = 0; i < 1000; ++i)
+
+    SECTION("UTF-8 with an old tree")
     {
-        code += "1,";
-    }
-    code += "1";
-    for (std::uint32_t i = 0; i < 1000; ++i)
-    {
-        code += "]";
-    }
-    code += "]";
-
-    ts::Input input(
-            [&](std::uint32_t byte, ts::Point, std::uint32_t *read)
-            {
-                *read = (byte < code.size()) ? 1 : 0;
-                return ts::details::make_view(code.c_str() + byte, *read);
-            },
-            ts::InputEncoding::UTF8);
-#if CPP_TS_TEST_HAS_CXX17
-    ts::Tree tree = parser.parse(input, {}, options);
-#else
-    ts::Tree tree = parser.parse(input, nullptr, &options);
-#endif // CPP_TS_TEST_HAS_CXX17
-    CHECK(calls > 0);
-    CHECK(static_cast<bool>(options.getProgressCallback()));
-}
-
-TEST_CASE("Parser Included Ranges", "[parser][range]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    ts::Range r1{ ts::Extent<ts::Point>{ { 0, 0 }, { 0, 5 } }, ts::Extent<std::uint32_t>{ 0, 5 } };
-    ts::Range r2{ ts::Extent<ts::Point>{ { 0, 10 }, { 0, 15 } }, ts::Extent<std::uint32_t>{ 10, 15 } };
-
-    std::vector<ts::Range> ranges = { r2, r1 };
-
-    CHECK(parser.setIncludedRanges(ranges));
-    std::vector<ts::Range> back = parser.getIncludedRanges();
-
-    REQUIRE(back.size() >= 1);
-    CHECK(back[0].byte.start == 0);
-}
-
-TEST_CASE("Parser Configuration and Language", "[parser]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    SECTION("Language management")
-    {
-        ts::LanguageView view = parser.getCurrentLanguage();
-        CHECK(view.isValid());
-        CHECK(view.operator const TSLanguage *() == lang.operator const TSLanguage *());
-        CHECK(view.getSymbolsCount() == lang.getView().getSymbolsCount());
-
-#if CPP_TS_TEST_HAS_CXX23
-        auto res = parser.setLanguage(lang);
-        CHECK(res.has_value());
-        CHECK(res.value());
-#else
-        CHECK(parser.setLanguage(lang));
-#endif // CPP_TS_TEST_HAS_CXX23
-
-        parser.reset();
-        CHECK(parser.getCurrentLanguage().operator const TSLanguage *() == lang.operator const TSLanguage *());
-    }
-}
-
-TEST_CASE("ParseOptions execution guarantees", "[parser][options]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-
-    std::string code = R"({"key": 42})";
-
-    SECTION("Empty options behave like standard parse")
-    {
-        ts::Input input(
-                [&](std::uint32_t byte, ts::Point, std::uint32_t *read)
-                {
-                    *read = (byte < code.size()) ? 1 : 0;
-                    return ts::details::make_view(code.c_str() + byte, *read);
-                },
-                ts::InputEncoding::UTF8);
-
-        // Empty (default) parse options
-        const ts::ParseOptions default_opts;
-
-#if CPP_TS_TEST_HAS_CXX17
-        ts::Tree tree = parser.parse(input, {}, default_opts);
-#else
-        ts::Tree tree = parser.parse(input, {}, &default_opts);
-#endif // CPP_TS_TEST_HAS_CXX17
+        const std::string code = "[1, 2, 3]";
+        const ts::Tree    tree = parser.parseStringEncoded(code, ts::InputEncoding::UTF8);
         CHECK_FALSE(tree.hasError());
-        CHECK(tree.getRootNode().getType().compare("document") == 0);
-    }
-}
+        CHECK(tree.getRootNode().getNamedChild(0).getNamedChildCount() == 3u);
 
-TEST_CASE("Parser Encoded Strings", "[parser]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
+        // "[1, 2, 3]" -> "[1, 5, 3]" (same length)
+        ts::Tree          old_tree = tree.copy();
+        const std::string new_code = "[1, 5, 3]";
+        old_tree.edit(ts::InputEdit(4, 5, 5, ts::Point(0, 4), ts::Point(0, 5), ts::Point(0, 5)));
 
-    // JSON in UTF-8 format
-    std::string utf8_code = "[1, 2, 3]";
-
-    SECTION("Parse UTF-8 explicitly")
-    {
-        ts::Tree tree = parser.parseStringEncoded(utf8_code, ts::InputEncoding::UTF8);
-        CHECK_FALSE(tree.hasError());
-        CHECK(tree.getRootNode().getNamedChild(0).getNamedChildCount() == 3);
-    }
-
-    SECTION("Parse with Old Tree (Incremental Encoded)")
-    {
-        ts::Tree old_tree = parser.parseString(utf8_code);
-
-        // Simulate small change in text
-        std::string   new_code = "[1, 5, 3]";
-        ts::InputEdit edit{ 4,        5,        5, // '2' to '5' (same length)
-                            { 0, 4 }, { 0, 5 }, { 0, 5 } };
-        old_tree.edit(edit);
-
-#if CPP_TS_TEST_HAS_CXX17
-        ts::Tree new_tree = parser.parseStringEncoded(new_code, ts::InputEncoding::UTF8, old_tree);
-#else
-        ts::Tree new_tree = parser.parseStringEncoded(new_code, ts::InputEncoding::UTF8, &old_tree);
-#endif // CPP_TS_TEST_HAS_CXX17
+        const ts::Tree new_tree = parser.parseStringEncoded(new_code, ts::InputEncoding::UTF8, old_tree);
         CHECK_FALSE(new_tree.hasError());
         CHECK(new_tree.getRootNode().getNamedChild(0).getNamedChild(1).getSourceText(new_code) == "5");
     }
 }
 
-TEST_CASE("Parser Debugging (DOT Graphs)", "[parser][debug]")
+TEST_CASE("Parser parses an Input", "[parser][input]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    const std::string  source = "[1, 2, 3]";
 
-    SECTION("Enable and Disable DOT graphs")
+    SECTION("Read in chunks")
     {
-        const char *temp_file = "parser_graph.dot";
-#if defined(_WIN32)
-        FILE *f = nullptr;
-        fopen_s(&f, temp_file, "w");
-#else
-        FILE *f = fopen(temp_file, "w");
-#endif // defined(_WIN32)
-        REQUIRE(f != nullptr);
+        const ts_test::ChunkedReader reader = { &source, 2 };
+        ts::Input                    input(reader, ts::InputEncoding::UTF8);
+        CHECK(input.getEncoding() == ts::InputEncoding::UTF8);
 
-        parser.enableDotGraphs(f);
-        ts::Tree tree = parser.parseString("[true]");
-        parser.disableDotGraphs();
-        fclose(f);
-
-#if defined(_WIN32)
-        FILE *f_check = nullptr;
-        fopen_s(&f_check, temp_file, "r");
-#else
-        FILE *f_check = fopen(temp_file, "r");
-#endif // defined(_WIN32)
-        REQUIRE(f_check != nullptr);
-
-        fseek(f_check, 0, SEEK_END);
-        long size = ftell(f_check);
-        fclose(f_check);
-
-        CHECK(size > 0);
-        std::remove(temp_file);
-    }
-}
-
-TEST_CASE("Parser DOT graphs by filename", "[parser][debug]")
-{
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  filename = "auto_graph.dot";
-
-    SECTION("Enable by path")
-    {
-        CHECK_NOTHROW(parser.enableDotGraphs(filename));
-
-        ts::Tree tree = parser.parseString("[1, 2, 3]");
-        parser.disableDotGraphs();
-
-        std::ifstream f(filename);
-        CHECK(f.good());
-        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        CHECK(content.find("digraph") != std::string::npos);
-        f.close();
-
-        CHECK(std::remove(filename.c_str()) == 0);
-    }
-}
-
-TEST_CASE("Parser Exception Handling (No Language)", "[parser][exceptions]")
-{
-    // Create a parser without assigning a language
-    ts::Parser empty_parser;
-
-    SECTION("Validation flags and getters on empty parser")
-    {
-        CHECK_FALSE(empty_parser.hasLanguage());
-        CHECK_FALSE(empty_parser.getCurrentLanguage().isValid());
+        const ts::Tree tree = parser.parse(input);
+        REQUIRE(tree.isValid());
+        CHECK_FALSE(tree.hasError());
+        CHECK(tree.getRootNode().getNamedChild(0).getNamedChildCount() == 3u);
     }
 
-    SECTION("Parsing without language throws logic_error")
+    SECTION("Read callback returning a sized view without writing bytes_read")
     {
-        std::string code = "{}";
-
-        CHECK_THROWS_AS(empty_parser.parseString(code), std::logic_error);
-        CHECK_THROWS_AS(empty_parser.parseStringEncoded(code, ts::InputEncoding::UTF8), std::logic_error);
-
         ts::Input input(
-                [](std::uint32_t, ts::Point, std::uint32_t *read)
+                [&source](std::uint32_t byte, ts::Point, std::uint32_t *) -> ts::details::StringViewReturn
                 {
-                    *read = 0;
-                    return ts::StringView();
+                    return byte < source.size()
+                                 ? ts::details::StringViewReturn(source.data() + byte, source.size() - byte)
+                                 : ts::details::StringViewReturn();
                 },
                 ts::InputEncoding::UTF8);
 
-        CHECK_THROWS_AS(empty_parser.parse(input), std::logic_error);
+        const ts::Tree tree = parser.parse(input);
+        CHECK_FALSE(tree.hasError());
+        CHECK(tree.getRootNode().getNamedChild(0).getNamedChildCount() == 3u);
     }
 
-    SECTION("Initialization with invalid language throws runtime_error")
+    SECTION("Empty parse options behave like a standard parse")
     {
-        ts::Language invalid_lang(nullptr);
-        CHECK_THROWS_AS(ts::Parser(invalid_lang), std::runtime_error);
+        ts::Input              input(ts_test::ChunkedReader{ &source, 1 }, ts::InputEncoding::UTF8);
+        const ts::ParseOptions options;
+
+        const ts::Tree tree = parser.parse(input, nullptr, options);
+        CHECK_FALSE(tree.hasError());
+        CHECK(tree.getRootNode().getType() == "document");
+    }
+}
+
+TEST_CASE("Input with a custom decoder", "[parser][input][regression]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    const std::string  source = "[1, 2]";
+
+    std::uint32_t decode_calls = 0;
+    ts::Input     input(ts_test::ChunkedReader{ &source, 64 },
+                        [&decode_calls](ts::ByteView bytes, std::int32_t *code_point) -> std::uint32_t
+                        {
+                        ++decode_calls;
+                        *code_point = bytes.empty() ? -1 : static_cast<std::int32_t>(bytes[0]);
+                        return 1;
+                        });
+
+    // Regression: the encoding used to be computed from the moved-from decoder and stayed UTF-8.
+    CHECK(input.getEncoding() == ts::InputEncoding::Custom);
+
+    const ts::Tree tree = parser.parse(input);
+    REQUIRE(tree.isValid());
+    CHECK_FALSE(tree.hasError());
+    CHECK(decode_calls > 0u);
+    CHECK(tree.getRootNode().getNamedChild(0).getNamedChildCount() == 2u);
+}
+
+TEST_CASE("Input accessors", "[parser][input]")
+{
+    ts::Input input;
+    CHECK(input.getEncoding() == ts::InputEncoding::UTF8);
+    CHECK_FALSE(static_cast<bool>(input.getRead()));
+    CHECK_FALSE(static_cast<bool>(input.getDecode()));
+
+    const std::string source = "[]";
+    input.setRead(ts_test::ChunkedReader{ &source, 1 });
+    CHECK(static_cast<bool>(input.getRead()));
+
+    // A null callback is ignored.
+    input.setRead(ts::Input::ReadFunction());
+    CHECK(static_cast<bool>(input.getRead()));
+
+    input.setDecode(
+            [](ts::ByteView, std::int32_t *code_point) -> std::uint32_t
+            {
+                *code_point = 'x';
+                return 1;
+            });
+    CHECK(input.getEncoding() == ts::InputEncoding::Custom);
+
+    // Leaving the custom encoding drops the decoder.
+    input.setEncoding(ts::InputEncoding::UTF16LE);
+    CHECK_FALSE(static_cast<bool>(input.getDecode()));
+
+    // Moving keeps the configuration.
+    ts::Input moved(std::move(input));
+    CHECK(moved.getEncoding() == ts::InputEncoding::UTF16LE);
+    CHECK(static_cast<bool>(moved.getRead()));
+
+    const TSInput raw = moved;
+    CHECK(raw.encoding == TSInputEncodingUTF16LE);
+    CHECK(raw.payload == static_cast<void *>(&moved));
+}
+
+TEST_CASE("Parser logger", "[parser][logger]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    CHECK_FALSE(parser.hasLogger());
+
+    std::uint32_t parse_messages = 0;
+    std::uint32_t lex_messages   = 0;
+    parser.setLogger(
+            [&parse_messages, &lex_messages](ts::LogType type, const char *message)
+            {
+                CHECK(message != nullptr);
+                ++(type == ts::LogType::Parse ? parse_messages : lex_messages);
+            });
+    CHECK(parser.hasLogger());
+
+    ts_test::discard(parser.parseString("[1]"));
+    CHECK(parse_messages > 0u);
+    CHECK(lex_messages > 0u);
+
+    parser.removeLogger();
+    CHECK_FALSE(parser.hasLogger());
+    const std::uint32_t before = parse_messages;
+    ts_test::discard(parser.parseString("[1, 2]"));
+    CHECK(parse_messages == before);
+
+    // An empty callable removes the logger too.
+    parser.setLogger([](ts::LogType, const char *) {});
+    parser.setLogger(ts::Parser::LoggerFunction());
+    CHECK_FALSE(parser.hasLogger());
+}
+
+TEST_CASE("ParseOptions progress callback accessors", "[parser][options]")
+{
+    ts::ParseOptions options;
+    CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
+
+    options.setProgressCallback([](ts::ParseState *) { return false; });
+    CHECK(static_cast<bool>(options.getProgressCallback()));
+
+    options.setProgressCallback(ts::ParseOptions::ProgressCallbackFunction());
+    CHECK_FALSE(static_cast<bool>(options.getProgressCallback()));
+
+    const ts::ParseOptions constructed([](ts::ParseState *) { return false; });
+    CHECK(static_cast<bool>(constructed.getProgressCallback()));
+}
+
+TEST_CASE("Parser progress callback", "[parser][options]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    // tree-sitter reports progress periodically, so the document has to be large enough.
+    const std::string source = ts_test::bigJsonArray(5000);
+    ts::Input         input(ts_test::ChunkedReader{ &source, 4096 }, ts::InputEncoding::UTF8);
+
+    SECTION("Called during the parse")
+    {
+        std::uint32_t          calls = 0;
+        const ts::ParseOptions options(
+                [&calls, &source](ts::ParseState *state) -> bool
+                {
+                    ++calls;
+                    CHECK(state->current_byte_offset <= source.size());
+                    return false;
+                });
+
+        const ts::Tree tree = parser.parse(input, nullptr, options);
+        CHECK(tree.isValid());
+        CHECK(calls > 0u);
+        // The options keep their callback.
+        CHECK(static_cast<bool>(options.getProgressCallback()));
+    }
+
+    SECTION("Returning true cancels the parse")
+    {
+        // The throwing API reports a missing tree with an invalid Tree, not with an exception.
+        const ts::ParseOptions cancel([](ts::ParseState *) { return true; });
+        CHECK_FALSE(parser.parse(input, nullptr, cancel).isValid());
+        CHECK_FALSE(parser.parse(input, nullptr, &cancel).isValid());
+
+        // The parser stays usable.
+        CHECK(parser.parse(input).isValid());
+    }
+}
+
+TEST_CASE("Parser rethrows exceptions thrown inside callbacks", "[parser][exceptions][regression]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    std::string        source = "[1, 2, 3]";
+
+    SECTION("Read callback")
+    {
+        ts::Input input([](std::uint32_t, ts::Point, std::uint32_t *) -> ts::details::StringViewReturn
+                        { throw std::runtime_error("read failed"); },
+                        ts::InputEncoding::UTF8);
+
+        CHECK_THROWS_WITH(parser.parse(input), "read failed");
+        // The parser stays usable and the input does not keep the old exception.
+        CHECK(parser.parseString(source).isValid());
+        CHECK_THROWS_WITH(parser.parse(input), "read failed");
+    }
+
+    SECTION("Decode callback")
+    {
+        ts::Input input(ts_test::ChunkedReader{ &source, 64 },
+                        [](ts::ByteView, std::int32_t *) -> std::uint32_t
+                        { throw std::invalid_argument("decode failed"); });
+
+        CHECK_THROWS_AS(parser.parse(input), std::invalid_argument);
+    }
+
+    SECTION("Logger")
+    {
+        parser.setLogger([](ts::LogType, const char *) { throw std::runtime_error("logger failed"); });
+        CHECK_THROWS_WITH(parser.parseString(source), "logger failed");
+
+        parser.removeLogger();
+        CHECK(parser.parseString(source).isValid());
+    }
+
+    SECTION("Progress callback")
+    {
+        // tree-sitter reports progress periodically, so the document has to be large enough.
+        source = ts_test::bigJsonArray(5000);
+        ts::Input              input(ts_test::ChunkedReader{ &source, 4096 }, ts::InputEncoding::UTF8);
+        const ts::ParseOptions options([](ts::ParseState *) -> bool { throw std::runtime_error("progress failed"); });
+
+        CHECK_THROWS_WITH(parser.parse(input, nullptr, options), "progress failed");
+    }
+}
+
+TEST_CASE("Parser incremental parsing and optional arguments", "[parser][edit]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    ts::Tree           tree = parser.parseString("[1]");
+
+    SECTION("The old tree is accepted in the same ways in every standard")
+    {
+        CHECK(parser.parseString("[1]", tree).isValid());
+        CHECK(parser.parseString("[1]", &tree).isValid());
+        CHECK(parser.parseString("[1]", nullptr).isValid());
+        CHECK(parser.parseString("[1]", {}).isValid());
+        CHECK(parser.parseString("[1]", std::ref(tree)).isValid());
+#if CPP_TS_HAS_OPTIONAL
+        CHECK(parser.parseString("[1]", std::nullopt).isValid());
+#endif // CPP_TS_HAS_OPTIONAL
+        CHECK(parser.parseStringEncoded("[1]", ts::InputEncoding::UTF8, tree).isValid());
+    }
+
+    SECTION("Reparse after an edit")
+    {
+        tree.edit(ts::InputEdit(2, 2, 5, ts::Point(0, 2), ts::Point(0, 2), ts::Point(0, 5)));
+        const ts::Tree updated = parser.parseString("[1, 2]", tree);
+        CHECK(updated.getRootNode().getNamedChild(0).getNamedChildCount() == 2u);
+    }
+}
+
+TEST_CASE("Parser included ranges", "[parser][range]")
+{
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+
+    SECTION("Only the included ranges are parsed")
+    {
+        // Only "[2]" (bytes 7..10) of the source is parsed.
+        std::vector<ts::Range> ranges;
+        ranges.push_back(bytes(7, 10));
+        CHECK(parser.setIncludedRanges(ranges));
+        REQUIRE(parser.getIncludedRanges().size() == 1u);
+        CHECK(parser.getIncludedRanges()[0].byte == ts::Extent<std::uint32_t>(7, 10));
+
+        const std::string source = "ignore [2] ignore";
+        const ts::Tree    tree   = parser.parseString(source);
+        CHECK(tree.getRootNode().getNamedChild(0).getSourceText(source) == "[2]");
+    }
+
+    SECTION("An empty list includes the whole document again")
+    {
+        const ts::Range narrow = bytes(4, 5);
+#if CPP_TS_HAS_SPAN
+        REQUIRE(parser.setIncludedRanges(std::span<const ts::Range>(&narrow, 1)));
+#else
+        REQUIRE(parser.setIncludedRanges(std::vector<ts::Range>(1, narrow)));
+#endif // CPP_TS_HAS_SPAN
+
+        CHECK(parser.setIncludedRanges(std::vector<ts::Range>()));
+        REQUIRE(parser.getIncludedRanges().size() == 1u);
+        CHECK(parser.getIncludedRanges()[0].byte.start == 0u);
+        CHECK(parser.getIncludedRanges()[0].byte.end == 0xFFFFFFFFu);
+
+        const std::string code = "[1, 2, 3]";
+        const ts::Tree    tree = parser.parseString(code);
+        CHECK_FALSE(tree.hasError());
+        CHECK(tree.getRootNode().getByteRange().end == code.size());
+    }
+
+    SECTION("Unordered and overlapping ranges are sorted and merged")
+    {
+        // tree-sitter alone would reject them.
+        std::vector<ts::Range> ranges;
+        ranges.push_back(bytes(20, 30));
+        ranges.push_back(bytes(0, 10));
+        ranges.push_back(bytes(5, 15));
+        CHECK(parser.setIncludedRanges(ranges));
+
+        const std::vector<ts::Range> result = parser.getIncludedRanges();
+        REQUIRE(result.size() == 2u);
+        CHECK(result[0].byte == ts::Extent<std::uint32_t>(0, 15));
+        CHECK(result[1].byte == ts::Extent<std::uint32_t>(20, 30));
+    }
+
+    SECTION("Enveloped ranges are merged")
+    {
+        std::vector<ts::Range> ranges;
+        ranges.push_back(bytes(5, 10));
+        ranges.push_back(bytes(0, 20));
+        CHECK(parser.setIncludedRanges(ranges));
+
+        const std::vector<ts::Range> result = parser.getIncludedRanges();
+        REQUIRE(result.size() == 1u);
+        CHECK(result[0].byte == ts::Extent<std::uint32_t>(0, 20));
     }
 }
 
 #if SIZE_MAX > UINT32_MAX
-TEST_CASE("Parser Input Limits (4GB Overflow)", "[parser][exceptions]")
+TEST_CASE("Parser rejects inputs longer than 4GB", "[parser][exceptions]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
 
-    SECTION("Exceeding 4GB string limit throws length_error")
-    {
-        // We avoid allocating 4GB by creating a fake view with an artificial size
-        const char           *fake_str      = "fake";
-        constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+    // A view with an artificial size, nothing of that size is allocated.
+    const char           *fake_str      = "fake";
+    constexpr std::size_t overflow_size = static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+    const ts::StringView  huge_view(fake_str, overflow_size);
 
-        const ts::StringView huge_view(fake_str, overflow_size);
-
-        CHECK_THROWS_AS(parser.parseString(huge_view), std::length_error);
-        CHECK_THROWS_AS(parser.parseStringEncoded(huge_view, ts::InputEncoding::UTF8), std::length_error);
-    }
+    CHECK_THROWS_AS(parser.parseString(huge_view), std::length_error);
+    CHECK_THROWS_AS(parser.parseStringEncoded(huge_view, ts::InputEncoding::UTF8), std::length_error);
 }
 #endif // SIZE_MAX > UINT32_MAX
 
-TEST_CASE("Parser Included Ranges Merging Algorithm", "[parser][range]")
+TEST_CASE("Parser DOT graphs", "[parser][debug]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
 
-    SECTION("Empty ranges resets included ranges")
+    SECTION("To a FILE")
     {
-        std::vector<ts::Range> empty_ranges;
-        CHECK(parser.setIncludedRanges(empty_ranges));
-        CHECK_FALSE(parser.getIncludedRanges().empty());
+        const char *path = "cpp-tree-sitter-parser-file.dot";
+        std::FILE  *file = openForWriting(path);
+        REQUIRE(file != nullptr);
+        parser.enableDotGraphs(file); // the parser writes to a duplicate of the descriptor
+        ts_test::discard(parser.parseString("[true]"));
+        parser.disableDotGraphs();
+        std::fclose(file);
+
+        const std::string content = ts_test::readFile(path);
+        std::remove(path);
+        CHECK_FALSE(content.empty());
     }
 
-    SECTION("Merge overlapping ranges")
+    SECTION("To a path")
     {
-        // Range 1: bytes 0 to 10
-        ts::Range r1{ ts::Extent<ts::Point>{ { 0, 0 }, { 0, 10 } }, ts::Extent<std::uint32_t>{ 0, 10 } };
-        // Range 2: bytes 5 to 15 (overlaps with r1)
-        ts::Range r2{ ts::Extent<ts::Point>{ { 0, 5 }, { 0, 15 } }, ts::Extent<std::uint32_t>{ 5, 15 } };
+        const std::string path = "cpp-tree-sitter-parser-path.dot";
+        CHECK_NOTHROW(parser.enableDotGraphs(path));
+        ts_test::discard(parser.parseString("[1, 2, 3]"));
+        parser.disableDotGraphs();
 
-        std::vector<ts::Range> ranges = { r1, r2 };
-        CHECK(parser.setIncludedRanges(ranges));
-
-        std::vector<ts::Range> merged = parser.getIncludedRanges();
-        REQUIRE(merged.size() == 1); // Should be merged into a single range
-        CHECK(merged[0].byte.start == 0);
-        CHECK(merged[0].byte.end == 15);
+        const std::string content = ts_test::readFile(path.c_str());
+        CHECK(std::remove(path.c_str()) == 0);
+        CHECK(ts_test::contains(content, "digraph"));
     }
 
-    SECTION("Merge fully enveloped ranges")
+    SECTION("A null FILE is ignored")
     {
-        // Range 1: bytes 0 to 20
-        ts::Range r1{ ts::Extent<ts::Point>{ { 0, 0 }, { 0, 20 } }, ts::Extent<std::uint32_t>{ 0, 20 } };
-        // Range 2: bytes 5 to 10 (fully inside r1)
-        ts::Range r2{ ts::Extent<ts::Point>{ { 0, 5 }, { 0, 10 } }, ts::Extent<std::uint32_t>{ 5, 10 } };
-
-        // Even if provided in reverse order, the sort algorithm should handle them
-        std::vector<ts::Range> ranges = { r2, r1 };
-        CHECK(parser.setIncludedRanges(ranges));
-
-        std::vector<ts::Range> merged = parser.getIncludedRanges();
-        REQUIRE(merged.size() == 1);
-        CHECK(merged[0].byte.start == 0);
-        CHECK(merged[0].byte.end == 20);
+        CHECK_NOTHROW(parser.enableDotGraphs(static_cast<std::FILE *>(nullptr)));
+        CHECK_NOTHROW(parser.disableDotGraphs());
     }
+
+#if !defined(_WIN32)
+    // The MSVC runtime treats _dup of a closed descriptor as an invalid parameter (debug assertion), so POSIX only.
+    SECTION("An invalid file descriptor")
+    {
+        CHECK_THROWS_AS(parser.enableDotGraphs(987654), std::runtime_error);
+        CHECK_NOTHROW(parser.disableDotGraphs());
+    }
+#endif // !defined(_WIN32)
 }
 
-TEST_CASE("Parser Included Ranges - Reset to full document", "[parser][range]")
+TEST_CASE("Parser move and moved-from state", "[parser][lifecycle][regression]")
 {
-    ts::Language lang(tree_sitter_json());
-    ts::Parser   parser(lang);
-    std::string  code = "[1, 2, 3]";
+    const ts::Language language(tree_sitter_json());
+    ts::Parser         parser(language);
+    std::uint32_t      logs = 0;
+    parser.setLogger([&logs](ts::LogType, const char *) { ++logs; });
 
-    SECTION("Resetting ranges parses the whole document")
-    {
-        // Restrict the parser to a specific narrow range (e.g., just the number '2')
-        ts::Range narrow_range{ ts::Extent<ts::Point>{ { 0, 4 }, { 0, 5 } }, ts::Extent<std::uint32_t>{ 4, 5 } };
+    // The logger keeps working after a move (its payload does not point to the old object).
+    ts::Parser moved(std::move(parser));
+    CHECK(moved.hasLanguage());
+    CHECK(moved.parseString("[1]").isValid());
+    CHECK(logs > 0u);
 
-#if CPP_TS_TEST_HAS_CXX20
-        REQUIRE(parser.setIncludedRanges(std::span<const ts::Range>{ &narrow_range, 1 }));
-#else
-        REQUIRE(parser.setIncludedRanges({ narrow_range }));
-#endif // CPP_TS_TEST_HAS_CXX20
+    // Using or assigning from a moved-from parser used to dereference a null TSParser.
+    ts::Parser target;
+    target = std::move(parser);
+    CHECK_FALSE(target.hasLanguage());
+    CHECK_NOTHROW(target.reset());
+    CHECK_NOTHROW(target.removeLogger());
+    CHECK(target.getIncludedRanges().empty());
+    CHECK_THROWS_AS(target.parseString("[1]"), std::logic_error);
 
-        // Pass an empty vector to tell the parser to evaluate the entire document again
-        std::vector<ts::Range> empty_ranges;
-        CHECK(parser.setIncludedRanges(empty_ranges));
-
-        // Parse the code to verify the parser successfully reads the whole string
-        ts::Tree tree = parser.parseString(code);
-        CHECK_FALSE(tree.hasError());
-
-        // The root node should span the entire length of the code
-        ts::Node root = tree.getRootNode();
-        CHECK(root.getByteRange().end == code.length());
-
-        // Tree-sitter returns one array when no ranges are restricting it
-        CHECK(parser.getIncludedRanges().size() == 1);
-    }
+    // A moved-from parser can be revived by assigning a language.
+    CHECK_NOTHROW(parser.reset());
+    CHECK(parser.setLanguage(language));
+    CHECK(parser.parseString("[2]").isValid());
+    CHECK(target.setLanguage(language));
+    CHECK(target.parseString("[2]").isValid());
 }
-
-#if CPP_TS_TEST_HAS_CXX23
-TEST_CASE("Parser C++23 Specific Features", "[parser][cxx23]")
-{
-    ts::Language lang(tree_sitter_json());
-
-    SECTION("Static factory create() success")
-    {
-        auto result = ts::Parser::create(lang);
-        REQUIRE(result.has_value());
-
-        ts::Parser parser = std::move(result.value());
-        CHECK(parser.hasLanguage());
-
-        ts::Tree tree = parser.parseString("{}");
-        CHECK_FALSE(tree.hasError());
-    }
-
-    SECTION("Static factory create() with invalid language")
-    {
-        ts::Language invalid_lang(nullptr);
-        auto         result = ts::Parser::create(invalid_lang);
-
-        REQUIRE_FALSE(result.has_value());
-        CHECK_THAT(result.error(), Catch::Matchers::ContainsSubstring("invalid"));
-    }
-
-    SECTION("setLanguage return type in C++23")
-    {
-        ts::Parser parser;
-        auto       res = parser.setLanguage(lang);
-
-        REQUIRE(res.has_value());
-        CHECK(parser.hasLanguage());
-    }
-}
-#endif // CPP_TS_TEST_HAS_CXX23

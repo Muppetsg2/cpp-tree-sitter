@@ -35,14 +35,6 @@ target_include_directories(${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 get_target_property(ACTUAL_STANDARD ${TARGET_NAME} CXX_STANDARD)
 message(STATUS "Actual standard for ${TARGET_NAME}: ${ACTUAL_STANDARD}")
 
-if(WIN32)
-    target_compile_definitions(${TARGET_NAME} PRIVATE _WIN32)
-elseif(APPLE)
-    target_compile_definitions(${TARGET_NAME} PRIVATE __APPLE__)
-elseif(UNIX)
-    target_compile_definitions(${TARGET_NAME} PRIVATE __linux__)
-endif()
-
 set(JSONGrammarArgs
     NAME tree-sitter-json
     GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json.git

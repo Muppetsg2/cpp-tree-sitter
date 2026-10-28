@@ -18,19 +18,19 @@ This document compares the performance of **`cpp-tree-sitter`** (the C++ wrapper
 | `ts::visit` Traversal (nested, depth 500) | +2.06 % | -- |
 | Query Matching | +3.28 % | +3.32 % |
 | Incremental Reparse | +0.71 % | **-1.36 %** (faster) |
-| Tree Copy | ±0.00 % | ±0.00 % |
+| Tree Copy | ï¿½0.00 % | ï¿½0.00 % |
 
-*(Negative values indicate that the C++ wrapper was **faster** than the raw C API in a given measurement—typical for measurement noise or cache layout effects at the micro/millisecond scale).*
+*(Negative values indicate that the C++ wrapper was **faster** than the raw C API in a given measurementï¿½typical for measurement noise or cache layout effects at the micro/millisecond scale).*
 
 ## Methodology
 
 The benchmark measures five groups of operations that most frequently appear in real-world tree-sitter usage:
 
-1. **Parsing** — from source string to syntax tree, tested on three sizes of a flat JSON array (100 / 1,000 / 10,000 items) and a deeply nested object (depth 500).
-2. **Tree Traversal** — full tree traversal using the C API cursor, the C++ wrapper cursor, and the built-in C++ `ts::visit` DFS utility.
-3. **Query Matching** — executing the `(string) @value` query on the tree and counting the matches.
-4. **Incremental Reparse** — editing the tree and reparsing it incrementally, compared against a full scratch reparse (to demonstrate the speedup of the incremental mechanism itself).
-5. **Tree Copy** — the cost of `Tree::copy()` vs. its C API equivalent.
+1. **Parsing** ï¿½ from source string to syntax tree, tested on three sizes of a flat JSON array (100 / 1,000 / 10,000 items) and a deeply nested object (depth 500).
+2. **Tree Traversal** ï¿½ full tree traversal using the C API cursor, the C++ wrapper cursor, and the built-in C++ `ts::visit` DFS utility.
+3. **Query Matching** ï¿½ executing the `(string) @value` query on the tree and counting the matches.
+4. **Incremental Reparse** ï¿½ editing the tree and reparsing it incrementally, compared against a full scratch reparse (to demonstrate the speedup of the incremental mechanism itself).
+5. **Tree Copy** ï¿½ the cost of `Tree::copy()` vs. its C API equivalent.
 
 Additionally, if the benchmark is built with `CPP_TS_BENCHMARK_FEATURE_WASM`, a **WASM** section is included (parsing and traversing a `.wasm` grammar using `WasmStore`/`WasmEngine`).
 
@@ -49,12 +49,20 @@ Additionally, if the benchmark is built with `CPP_TS_BENCHMARK_FEATURE_WASM`, a 
 
 The benchmark code compiles without modification under C++11 through C++23. It actively utilizes newer language features when available rather than avoiding them:
 
-* Under **C++23**, object creation goes through non-throwing `Parser::create` / `Query::create` / `WasmStore::create` factories, returning `std::expected<T, std::string>`. Prior to C++23, these factories do not exist in the headers (guarded by `#if CPP_TS_HAS_CXX23`), so the benchmark falls back to throwing constructors and normalizes the error to `std::runtime_error`.
-* Passing the "old tree" to `Parser::parseString` for incremental parsing requires `std::ref(tree)` under **C++17+** (where `OptionalParam<Tree>` resolves to `std::optional<std::reference_wrapper<Tree>>`), and `&tree` on older standards (where `OptionalParam<Tree>` resolves to `Tree*`).
+* Under **C++23**, object creation goes through non-throwing `Parser::create` / `Query::create` / `WasmStore::create` factories, returning `std::expected<T, ts::Error>`. Prior to C++23, these factories do not exist in the headers (guarded by `#if CPP_TS_HAS_EXPECTED`), so the benchmark falls back to throwing constructors and normalizes the error to `std::runtime_error`.
+* Passing the "old tree" to `Parser::parseString` for incremental parsing accepts the same syntax in every standard (`tree`, `&tree`, `nullptr`, `{}` and, since C++17, `std::nullopt` or `std::ref(tree)`).
 
 > **Note:** If you build `cpp-tree-sitter` as a separate translation unit (non-header-only), ensure its `CPP_TS_CXX_STANDARD` matches the standard used to build the benchmark.
 
 ---
+
+## Automated runs (GitHub Actions)
+
+The [`Benchmarks`](../.github/workflows/benchmarks.yml) workflow (started manually from the *Actions* tab) builds the suite in Release mode with IPO and Wasm enabled for every compiler/OS pair (GCC and Clang on Linux, AppleClang on MacOS, MSVC on Windows) and every supported C++ standard. Each run writes one file per configuration to [`docs/benchmarks`](benchmarks/) named `<system>-<compiler>-cxx<standard>.txt` (e.g. `linux-gcc-cxx20.txt`) and commits them to the branch the workflow was started from.
+
+GitHub-hosted runners are shared virtual machines, so absolute times vary between runs. Compare the wrapper/C API overhead inside one file rather than raw times between files.
+
+To run the suite locally without the final "Press Enter" prompt, pass `--no-wait` (it is also skipped automatically when the standard input is not a terminal).
 
 ## Results
 
@@ -95,7 +103,7 @@ The benchmark code compiles without modification under C++11 through C++23. It a
 
 | Metric | C API (Median) | C++ Wrapper (Median) | Wrapper Overhead | Interleaved Overhead |
 | --- | --- | --- | --- | --- |
-| Execution Time | 0.0001 ms | 0.0001 ms | **±0.00 %** | **±0.00 %** |
+| Execution Time | 0.0001 ms | 0.0001 ms | **ï¿½0.00 %** | **ï¿½0.00 %** |
 
 #### WASM (WebAssembly Grammar)
 
@@ -154,7 +162,7 @@ The benchmark code compiles without modification under C++11 through C++23. It a
 
 | Metric | C API (Median) | C++ Wrapper (Median) | Wrapper Overhead | Interleaved Overhead |
 | --- | --- | --- | --- | --- |
-| Execution Time | 0.0001 ms | 0.0001 ms | **±0.00 %** | **±0.00 %** |
+| Execution Time | 0.0001 ms | 0.0001 ms | **ï¿½0.00 %** | **ï¿½0.00 %** |
 
 #### WASM (WebAssembly Grammar)
 
@@ -213,7 +221,7 @@ The benchmark code compiles without modification under C++11 through C++23. It a
 
 | Metric | C API (Median) | C++ Wrapper (Median) | Wrapper Overhead | Interleaved Overhead |
 | --- | --- | --- | --- | --- |
-| Execution Time | 0.0001 ms | 0.0001 ms | **±0.00 %** | **±0.00 %** |
+| Execution Time | 0.0001 ms | 0.0001 ms | **ï¿½0.00 %** | **ï¿½0.00 %** |
 
 #### WASM (WebAssembly Grammar)
 
@@ -272,7 +280,7 @@ The benchmark code compiles without modification under C++11 through C++23. It a
 
 | Metric | C API (Median) | C++ Wrapper (Median) | Wrapper Overhead | Interleaved Overhead |
 | --- | --- | --- | --- | --- |
-| Execution Time | 0.0001 ms | 0.0001 ms | **±0.00 %** | **±0.00 %** |
+| Execution Time | 0.0001 ms | 0.0001 ms | **ï¿½0.00 %** | **ï¿½0.00 %** |
 
 #### WASM (WebAssembly Grammar)
 
@@ -297,8 +305,8 @@ The benchmark code compiles without modification under C++11 through C++23. It a
 ## Conclusions
 
 * **Parsing and Incremental Reparse:** The wrapper introduces absolutely no measurable cost. With IPO enabled, any minor discrepancies trend negative (faster than C API), proving the abstractions are fully optimized away.
-* **Traversal and Query Matching:** The overhead sits around **1–3%**, primarily resulting from the C++ wrapper's bounds checking and iterator management. For operations spanning tens of milliseconds, this is virtually imperceptible.
-* **`ts::visit` vs Manual Cursor:** The convenience of the DFS visitor utility adds roughly ~1.5–2.5% overhead compared to manual cursor manipulation—an easily justifiable trade-off for safer, much more readable code.
+* **Traversal and Query Matching:** The overhead sits around **1ï¿½3%**, primarily resulting from the C++ wrapper's bounds checking and iterator management. For operations spanning tens of milliseconds, this is virtually imperceptible.
+* **`ts::visit` vs Manual Cursor:** The convenience of the DFS visitor utility adds roughly ~1.5ï¿½2.5% overhead compared to manual cursor manipulationï¿½an easily justifiable trade-off for safer, much more readable code.
 * **Interleaved Stability:** The interleaved results firmly prove that the C++ wrapper's performance does not rely on artificial cache "warm-up" advantages that might occur in a tight loop.
 * **WASM Overhead:** Operating on WASM grammars through the C++ Wrapper has identical (or even slightly negative) overheads compared to using the WASM C API directly. The only heavy lifting is done during module initialization.
 

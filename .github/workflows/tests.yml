@@ -1,0 +1,74 @@
+name: Tests
+
+# Builds and runs every test configuration: each compiler/OS pair, every supported C++ standard,
+# with and without the Wasm feature. The same test files run with Catch2 (C++14 and newer) and with the built-in
+# framework of tests/framework (C++11, Catch2 v3 needs C++14). MSVC has no C++11 mode, so that combination is skipped.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.system }} / ${{ matrix.compiler }} / C++${{ matrix.std }} / wasm ${{ matrix.wasm }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang, appleclang, msvc]
+        std: [11, 14, 17, 20, 23]
+        wasm: ['OFF', 'ON']
+        include:
+          - { compiler: gcc,        system: linux,   os: ubuntu-24.04,   cc: gcc-14,   cxx: g++-14 }
+          - { compiler: clang,      system: linux,   os: ubuntu-24.04,   cc: clang-18, cxx: clang++-18 }
+          - { compiler: appleclang, system: macos,   os: macos-latest,   cc: clang,    cxx: clang++ }
+          - { compiler: msvc,       system: windows, os: windows-latest, cc: cl,       cxx: cl }
+        exclude:
+          - { compiler: msvc, std: 11 }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install CMake and Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Set up MSVC environment
+        if: matrix.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache CPM sources
+        uses: actions/cache@v4
+        with:
+          path: cpm_cache
+          key: cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libs_config.cmake', 'tests/CMakeLists.txt') }}
+          restore-keys: cpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCPM_SOURCE_CACHE="$GITHUB_WORKSPACE/cpm_cache"
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCPP_TS_CXX_STANDARD=${{ matrix.std }}
+          -DCPP_TS_FEATURE_WASM=${{ matrix.wasm }}
+          -DCPP_TS_BUILD_TESTS=ON
+          -DCPP_TS_BUILD_BENCHMARK=ON
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --parallel
+
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build --output-on-failure --parallel 4
