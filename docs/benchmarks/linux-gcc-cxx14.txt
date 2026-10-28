@@ -1,0 +1,210 @@
+# cpp-tree-sitter benchmark
+# Configuration: linux / gcc / C++14 / Release, IPO, Wasm ON
+# Runner: ubuntu-24.04 (ubuntu24 20261026.354.1), X64
+# Commit: f1bc03fb92d2af64d9fe35c1b8bf20da30fbbd7a
+# Date (UTC): 2026-10-28 22:38:31
+
+cpp-tree-sitter Benchmark Suite
+System: Linux
+Compiler: GCC 14.2.0
+C++ language level (__cplusplus): 201402
+C++ standard detected: C++11/C++14
+WASM benchmarks: enabled
+====================================================================================================
+
+PARSING RESULTS:
+-- Flat array (100 items) (4.67871 KB) --
+  C API                                    | Avg: 0.4056   ms | Med: 0.4033   ms | Min: 0.3859   ms | Max: 0.4531   ms | Std: 0.0067   ms
+  C++ Wrapper                              | Avg: 0.4025   ms | Med: 0.3999   ms | Min: 0.3849   ms | Max: 0.4927   ms | Std: 0.0085   ms
+  [Interleaved] C API                      | Avg: 0.3977   ms | Med: 0.3939   ms | Min: 0.3892   ms | Max: 0.5062   ms | Std: 0.0139   ms
+  [Interleaved] C++ Wrapper                | Avg: 0.3956   ms | Med: 0.3920   ms | Min: 0.3850   ms | Max: 0.5868   ms | Std: 0.0159   ms
+
+  Wrapper overhead (median): -0.84 %
+  [Interleaved] Wrapper overhead (median): -0.48 %
+
+-- Flat array (1,000 items) (47.75 KB) --
+  C API                                    | Avg: 4.1292   ms | Med: 4.1166   ms | Min: 4.0433   ms | Max: 4.4620   ms | Std: 0.0590   ms
+  C++ Wrapper                              | Avg: 4.0919   ms | Med: 4.0843   ms | Min: 4.0194   ms | Max: 4.3220   ms | Std: 0.0480   ms
+  [Interleaved] C API                      | Avg: 4.1790   ms | Med: 4.1533   ms | Min: 4.0400   ms | Max: 7.0023   ms | Std: 0.2558   ms
+  [Interleaved] C++ Wrapper                | Avg: 4.1281   ms | Med: 4.1097   ms | Min: 4.0155   ms | Max: 6.9892   ms | Std: 0.2092   ms
+
+  Wrapper overhead (median): -0.79 %
+  [Interleaved] Wrapper overhead (median): -1.05 %
+
+-- Flat array (10,000 items) (487.20 KB) --
+  C API                                    | Avg: 46.2818  ms | Med: 45.3587  ms | Min: 43.5574  ms | Max: 55.8124  ms | Std: 2.5628   ms
+  C++ Wrapper                              | Avg: 45.2048  ms | Med: 45.0796  ms | Min: 43.4474  ms | Max: 50.2051  ms | Std: 0.9928   ms
+  [Interleaved] C API                      | Avg: 43.6880  ms | Med: 44.3509  ms | Min: 39.7447  ms | Max: 55.4166  ms | Std: 3.2566   ms
+  [Interleaved] C++ Wrapper                | Avg: 43.1513  ms | Med: 43.6789  ms | Min: 39.5638  ms | Max: 51.4429  ms | Std: 2.7278   ms
+
+  Wrapper overhead (median): -0.62 %
+  [Interleaved] Wrapper overhead (median): -1.52 %
+
+-- Nested object (depth 500) (3.42 KB) --
+  C API                                    | Avg: 0.5641   ms | Med: 0.5632   ms | Min: 0.5404   ms | Max: 0.6071   ms | Std: 0.0091   ms
+  C++ Wrapper                              | Avg: 0.5469   ms | Med: 0.5461   ms | Min: 0.5314   ms | Max: 0.5938   ms | Std: 0.0081   ms
+  [Interleaved] C API                      | Avg: 0.5471   ms | Med: 0.5467   ms | Min: 0.5300   ms | Max: 0.5956   ms | Std: 0.0081   ms
+  [Interleaved] C++ Wrapper                | Avg: 0.5466   ms | Med: 0.5458   ms | Min: 0.5304   ms | Max: 0.5905   ms | Std: 0.0083   ms
+
+  Wrapper overhead (median): -3.03 %
+  [Interleaved] Wrapper overhead (median): -0.17 %
+
+TREE TRAVERSAL RESULTS:
+-- Flat array (10,000 items) --
+  C API (cursor)                           | Avg: 8.0436   ms | Med: 7.8669   ms | Min: 7.3757   ms | Max: 10.3939  ms | Std: 0.6126   ms
+  C++ Wrapper (cursor)                     | Avg: 7.8981   ms | Med: 7.8922   ms | Min: 7.5807   ms | Max: 8.4233   ms | Std: 0.1367   ms
+  C++ Wrapper (ts::visit)                  | Avg: 7.8319   ms | Med: 7.7885   ms | Min: 7.4772   ms | Max: 8.9901   ms | Std: 0.2407   ms
+  [Interleaved] C API (cursor)             | Avg: 11.0636  ms | Med: 11.3984  ms | Min: 9.5352   ms | Max: 12.8603  ms | Std: 0.8405   ms
+  [Interleaved] C++ Wrapper (cursor)       | Avg: 11.0227  ms | Med: 11.3564  ms | Min: 9.5912   ms | Max: 13.4926  ms | Std: 0.8729   ms
+
+  Cursor wrapper overhead (median): +0.32 %
+  ts::visit overhead (median):      -1.00 %
+  [Interleaved] Cursor wrapper overhead (median): -0.37 %
+
+-- Nested object (depth 500) --
+  C API (cursor)                           | Avg: 0.0970   ms | Med: 0.0960   ms | Min: 0.0953   ms | Max: 0.1189   ms | Std: 0.0031   ms
+  C++ Wrapper (cursor)                     | Avg: 0.0984   ms | Med: 0.0974   ms | Min: 0.0971   ms | Max: 0.1076   ms | Std: 0.0024   ms
+  C++ Wrapper (ts::visit)                  | Avg: 0.0978   ms | Med: 0.0970   ms | Min: 0.0967   ms | Max: 0.1062   ms | Std: 0.0021   ms
+  [Interleaved] C API (cursor)             | Avg: 0.0989   ms | Med: 0.0970   ms | Min: 0.0963   ms | Max: 0.1308   ms | Std: 0.0051   ms
+  [Interleaved] C++ Wrapper (cursor)       | Avg: 0.0989   ms | Med: 0.0977   ms | Min: 0.0970   ms | Max: 0.1180   ms | Std: 0.0032   ms
+
+  Cursor wrapper overhead (median): +1.49 %
+  ts::visit overhead (median):      +1.02 %
+  [Interleaved] Cursor wrapper overhead (median): +0.69 %
+
+QUERY MATCHING RESULTS (pattern: (string) @value):
+  C API                                    | Avg: 23.8528  ms | Med: 23.8786  ms | Min: 23.3424  ms | Max: 25.1957  ms | Std: 0.2831   ms
+  C++ Wrapper                              | Avg: 24.8849  ms | Med: 24.5833  ms | Min: 23.9891  ms | Max: 29.3983  ms | Std: 1.0081   ms
+  [Interleaved] C API                      | Avg: 26.8754  ms | Med: 27.0553  ms | Min: 25.3329  ms | Max: 27.7688  ms | Std: 0.5883   ms
+  [Interleaved] C++ Wrapper                | Avg: 28.0687  ms | Med: 28.2240  ms | Min: 26.6056  ms | Max: 29.1706  ms | Std: 0.6875   ms
+
+  Matches found: 40000
+  Wrapper overhead (median): +2.95 %
+  [Interleaved] Wrapper overhead (median): +4.32 %
+
+INCREMENTAL REPARSE RESULTS:
+  C API (incremental)                      | Avg: 0.2926   ms | Med: 0.2919   ms | Min: 0.2775   ms | Max: 0.3555   ms | Std: 0.0091   ms
+  C++ Wrapper (incremental)                | Avg: 0.2940   ms | Med: 0.2929   ms | Min: 0.2776   ms | Max: 0.3171   ms | Std: 0.0074   ms
+  [Interleaved] C API (incremental)        | Avg: 0.3016   ms | Med: 0.3025   ms | Min: 0.2810   ms | Max: 0.3541   ms | Std: 0.0118   ms
+  [Interleaved] C++ Wrapper (incremental)  | Avg: 0.2978   ms | Med: 0.2981   ms | Min: 0.2789   ms | Max: 0.3255   ms | Std: 0.0087   ms
+
+  Wrapper overhead (median): +0.36 %
+  [Interleaved] Wrapper overhead (median): -1.46 %
+  C API (full reparse)                     | Avg: 4.1161   ms | Med: 4.1111   ms | Min: 3.9742   ms | Max: 4.3107   ms | Std: 0.0414   ms
+  C++ Wrapper (full reparse)               | Avg: 4.1225   ms | Med: 4.1202   ms | Min: 4.0284   ms | Max: 4.2934   ms | Std: 0.0310   ms
+  [Interleaved] C API (full reparse)       | Avg: 3.9868   ms | Med: 3.9833   ms | Min: 3.9323   ms | Max: 4.0842   ms | Std: 0.0212   ms
+  [Interleaved] C++ Wrapper (full reparse) | Avg: 3.9921   ms | Med: 3.9812   ms | Min: 3.9544   ms | Max: 5.1745   ms | Std: 0.0876   ms
+
+  Incremental vs full reparse (C API, median):       -92.90 %
+  Incremental vs full reparse (C++ Wrapper, median): -92.89 %
+  [Interleaved] Incremental vs full reparse (C API, median):       -92.41 %
+  [Interleaved] Incremental vs full reparse (C++ Wrapper, median): -92.51 %
+
+TREE COPY RESULTS:
+  C API                                    | Avg: 0.0000   ms | Med: 0.0000   ms | Min: 0.0000   ms | Max: 0.0002   ms | Std: 0.0000   ms
+  C++ Wrapper                              | Avg: 0.0000   ms | Med: 0.0000   ms | Min: 0.0000   ms | Max: 0.0000   ms | Std: 0.0000   ms
+  [Interleaved] C API                      | Avg: 0.0000   ms | Med: 0.0000   ms | Min: 0.0000   ms | Max: 0.0002   ms | Std: 0.0000   ms
+  [Interleaved] C++ Wrapper                | Avg: 0.0000   ms | Med: 0.0000   ms | Min: 0.0000   ms | Max: 0.0000   ms | Std: 0.0000   ms
+
+  Wrapper overhead (median): +12.68 %
+  [Interleaved] Wrapper overhead (median): +14.29 %
+
+
+WASM RESULTS (grammar: /home/runner/work/cpp-tree-sitter/cpp-tree-sitter/build/wasm_files/tree-sitter-json.wasm):
+
+WASM PARSING RESULTS:
+-- Flat array (100 items) (4.68 KB) --
+  WASM C API                               | Avg: 0.6026   ms | Med: 0.6017   ms | Min: 0.5924   ms | Max: 0.7024   ms | Std: 0.0114   ms
+  WASM C++ Wrapper                         | Avg: 0.5998   ms | Med: 0.5999   ms | Min: 0.5899   ms | Max: 0.6702   ms | Std: 0.0076   ms
+  [Interleaved] WASM C API                 | Avg: 0.5990   ms | Med: 0.5987   ms | Min: 0.5885   ms | Max: 0.6939   ms | Std: 0.0109   ms
+  [Interleaved] WASM C++ Wrapper           | Avg: 0.6192   ms | Med: 0.6195   ms | Min: 0.6096   ms | Max: 0.6867   ms | Std: 0.0082   ms
+
+  Wrapper overhead (median): -0.30 %
+  [Interleaved] Wrapper overhead (median): +3.48 %
+
+-- Flat array (1,000 items) (47.75 KB) --
+  WASM C API                               | Avg: 6.0801   ms | Med: 6.0687   ms | Min: 6.0406   ms | Max: 6.2964   ms | Std: 0.0368   ms
+  WASM C++ Wrapper                         | Avg: 6.2803   ms | Med: 6.2621   ms | Min: 6.1564   ms | Max: 7.8209   ms | Std: 0.1485   ms
+  [Interleaved] WASM C API                 | Avg: 6.1622   ms | Med: 6.1473   ms | Min: 6.0958   ms | Max: 6.4359   ms | Std: 0.0522   ms
+  [Interleaved] WASM C++ Wrapper           | Avg: 6.0934   ms | Med: 6.0795   ms | Min: 6.0250   ms | Max: 6.3952   ms | Std: 0.0505   ms
+
+  Wrapper overhead (median): +3.19 %
+  [Interleaved] Wrapper overhead (median): -1.10 %
+
+-- Flat array (10,000 items) (487.20 KB) --
+  WASM C API                               | Avg: 61.3178  ms | Med: 61.2191  ms | Min: 60.7760  ms | Max: 64.7501  ms | Std: 0.5490   ms
+  WASM C++ Wrapper                         | Avg: 67.4692  ms | Med: 67.4813  ms | Min: 66.2413  ms | Max: 69.1693  ms | Std: 0.6515   ms
+  [Interleaved] WASM C API                 | Avg: 62.6011  ms | Med: 61.6777  ms | Min: 61.0440  ms | Max: 67.8480  ms | Std: 1.5022   ms
+  [Interleaved] WASM C++ Wrapper           | Avg: 62.7725  ms | Med: 61.4843  ms | Min: 60.8505  ms | Max: 77.1663  ms | Std: 2.1865   ms
+
+  Wrapper overhead (median): +10.23 %
+  [Interleaved] Wrapper overhead (median): -0.31 %
+
+-- Nested object (depth 500) (3.42 KB) --
+  WASM C API                               | Avg: 0.7610   ms | Med: 0.7621   ms | Min: 0.7401   ms | Max: 0.8215   ms | Std: 0.0095   ms
+  WASM C++ Wrapper                         | Avg: 0.7810   ms | Med: 0.7823   ms | Min: 0.7550   ms | Max: 0.8535   ms | Std: 0.0116   ms
+  [Interleaved] WASM C API                 | Avg: 0.7650   ms | Med: 0.7665   ms | Min: 0.7348   ms | Max: 0.8095   ms | Std: 0.0105   ms
+  [Interleaved] WASM C++ Wrapper           | Avg: 0.7731   ms | Med: 0.7742   ms | Min: 0.7439   ms | Max: 0.8541   ms | Std: 0.0109   ms
+
+  Wrapper overhead (median): +2.66 %
+  [Interleaved] Wrapper overhead (median): +1.02 %
+
+WASM TREE TRAVERSAL RESULTS:
+-- Flat array (10,000 items) --
+  WASM C API (cursor)                      | Avg: 7.6164   ms | Med: 7.6242   ms | Min: 7.2912   ms | Max: 8.0255   ms | Std: 0.1612   ms
+  WASM C++ Wrapper (cursor)                | Avg: 7.7621   ms | Med: 7.7530   ms | Min: 7.4857   ms | Max: 8.0879   ms | Std: 0.1304   ms
+  WASM C++ Wrapper (ts::visit)             | Avg: 7.8130   ms | Med: 7.7931   ms | Min: 7.5328   ms | Max: 8.2848   ms | Std: 0.1395   ms
+  [Interleaved] WASM C API (cursor)        | Avg: 10.3501  ms | Med: 10.2979  ms | Min: 9.4339   ms | Max: 11.5709  ms | Std: 0.4439   ms
+  [Interleaved] WASM C++ Wrapper (cursor)  | Avg: 10.5945  ms | Med: 10.4602  ms | Min: 9.9138   ms | Max: 11.9486  ms | Std: 0.4524   ms
+
+  Cursor wrapper overhead (median): +1.69 %
+  ts::visit overhead (median):      +2.22 %
+  [Interleaved] Cursor wrapper overhead (median): +1.58 %
+
+-- Nested object (depth 500) --
+  WASM C API (cursor)                      | Avg: 0.0971   ms | Med: 0.0955   ms | Min: 0.0952   ms | Max: 0.1243   ms | Std: 0.0047   ms
+  WASM C++ Wrapper (cursor)                | Avg: 0.0989   ms | Med: 0.0980   ms | Min: 0.0977   ms | Max: 0.1064   ms | Std: 0.0021   ms
+  WASM C++ Wrapper (ts::visit)             | Avg: 0.0995   ms | Med: 0.0985   ms | Min: 0.0981   ms | Max: 0.1162   ms | Std: 0.0027   ms
+  [Interleaved] WASM C API (cursor)        | Avg: 0.0992   ms | Med: 0.0980   ms | Min: 0.0965   ms | Max: 0.1085   ms | Std: 0.0030   ms
+  [Interleaved] WASM C++ Wrapper (cursor)  | Avg: 0.0995   ms | Med: 0.0989   ms | Min: 0.0978   ms | Max: 0.1064   ms | Std: 0.0018   ms
+
+  Cursor wrapper overhead (median): +2.62 %
+  ts::visit overhead (median):      +3.13 %
+  [Interleaved] Cursor wrapper overhead (median): +0.92 %
+
+====================================================================================================
+SUMMARY - C++ Wrapper overhead vs raw C API (median-based):
+  Parsing - Flat array (100 items)                                  : -0.84 %
+  [Interleaved] Parsing - Flat array (100 items)                    : -0.48 %
+  Parsing - Flat array (1,000 items)                                : -0.79 %
+  [Interleaved] Parsing - Flat array (1,000 items)                  : -1.05 %
+  Parsing - Flat array (10,000 items)                               : -0.62 %
+  [Interleaved] Parsing - Flat array (10,000 items)                 : -1.52 %
+  Parsing - Nested object (depth 500)                               : -3.03 %
+  [Interleaved] Parsing - Nested object (depth 500)                 : -0.17 %
+  Traversal (cursor) - Flat array (10,000 items)                    : +0.32 %
+  Traversal (visit) - Flat array (10,000 items)                     : -1.00 %
+  [Interleaved] Traversal (cursor) - Flat array (10,000 items)      : -0.37 %
+  Traversal (cursor) - Nested object (depth 500)                    : +1.49 %
+  Traversal (visit) - Nested object (depth 500)                     : +1.02 %
+  [Interleaved] Traversal (cursor) - Nested object (depth 500)      : +0.69 %
+  Query matching                                                    : +2.95 %
+  [Interleaved] Query matching                                      : +4.32 %
+  Incremental reparse                                               : +0.36 %
+  [Interleaved] Incremental reparse                                 : -1.46 %
+  Tree copy                                                         : +12.68 %
+  [Interleaved] Tree copy                                           : +14.29 %
+  WASM Parsing - Flat array (100 items)                             : -0.30 %
+  [Interleaved] WASM Parsing - Flat array (100 items)               : +3.48 %
+  WASM Parsing - Flat array (1,000 items)                           : +3.19 %
+  [Interleaved] WASM Parsing - Flat array (1,000 items)             : -1.10 %
+  WASM Parsing - Flat array (10,000 items)                          : +10.23 %
+  [Interleaved] WASM Parsing - Flat array (10,000 items)            : -0.31 %
+  WASM Parsing - Nested object (depth 500)                          : +2.66 %
+  [Interleaved] WASM Parsing - Nested object (depth 500)            : +1.02 %
+  WASM Traversal (cursor) - Flat array (10,000 items)               : +1.69 %
+  WASM Traversal (visit) - Flat array (10,000 items)                : +2.22 %
+  [Interleaved] WASM Traversal (cursor) - Flat array (10,000 items) : +1.58 %
+  WASM Traversal (cursor) - Nested object (depth 500)               : +2.62 %
+  WASM Traversal (visit) - Nested object (depth 500)                : +3.13 %
+  [Interleaved] WASM Traversal (cursor) - Nested object (depth 500) : +0.92 %
