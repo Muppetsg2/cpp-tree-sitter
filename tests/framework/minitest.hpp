@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -655,6 +656,63 @@ namespace ts_test
 #pragma endregion
     };
 
+    /**
+     * @brief Prints pointers as addresses (`nullptr` for a null pointer).
+     * @details Pointers are never written with `operator<<` directly: character pointers would be read as C strings.
+     * @tparam T Pointed type.
+     */
+    template <typename T>
+    struct StringMaker<T *>
+    {
+#pragma region CONVERSION
+
+        /////////////////////////////////////////////////////////////////////////////
+        // Conversion
+        /////////////////////////////////////////////////////////////////////////////
+
+        /**
+         * @brief Converts a value to text.
+         * @param value Converted value.
+         * @return Returns the address, or "nullptr".
+         */
+        static std::string convert(T *value)
+        {
+            const void *address = const_cast<const typename std::remove_cv<T>::type *>(value);
+            return address ? details::stream(address) : "nullptr";
+        }
+
+#pragma endregion
+    };
+
+    /**
+     * @brief Prints the owned pointer of a `std::unique_ptr` like a raw pointer.
+     * @details Some standard libraries (libc++) provide `operator<<` for `std::unique_ptr` in every standard; it
+     * streams `get()`, which crashes for a null `char` pointer.
+     * @tparam T Owned type.
+     * @tparam D Deleter type.
+     */
+    template <typename T, typename D>
+    struct StringMaker<std::unique_ptr<T, D>>
+    {
+#pragma region CONVERSION
+
+        /////////////////////////////////////////////////////////////////////////////
+        // Conversion
+        /////////////////////////////////////////////////////////////////////////////
+
+        /**
+         * @brief Converts a value to text.
+         * @param value Converted value.
+         * @return Returns the text of the owned pointer.
+         */
+        static std::string convert(const std::unique_ptr<T, D> &value)
+        {
+            return StringMaker<T *>::convert(value.get());
+        }
+
+#pragma endregion
+    };
+
     /// @brief Prints C strings in quotes (`nullptr` for a null pointer).
     template <>
     struct StringMaker<const char *>
@@ -907,6 +965,7 @@ namespace ts_test
         ExpressionResult operator&&(const R &rhs) const
         {
             static_assert(sizeof(R) == 0, "&& cannot be decomposed: write CHECK((a && b)) or use two checks");
+            static_cast<void>(rhs);
             return ExpressionResult();
         }
 
@@ -920,6 +979,7 @@ namespace ts_test
         ExpressionResult operator||(const R &rhs) const
         {
             static_assert(sizeof(R) == 0, "|| cannot be decomposed: write CHECK((a || b)) or use two checks");
+            static_cast<void>(rhs);
             return ExpressionResult();
         }
 
