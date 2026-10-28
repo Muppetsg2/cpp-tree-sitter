@@ -45,17 +45,31 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install CMake and Ninja
         uses: lukka/get-cmake@latest
 
       - name: Set up MSVC environment
         if: matrix.compiler == 'msvc'
-        uses: ilammy/msvc-dev-cmd@v1
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          $path = $env:PATH -split ';'
+          cmd /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -notmatch '^([^=]+)=(.*)$') { return }
+            $name, $value = $Matches[1], $Matches[2]
+            if ($name -eq 'Path') {
+              $value -split ';' | Where-Object { $_ -and $path -notcontains $_ } | Add-Content -Path $env:GITHUB_PATH
+            } elseif ([Environment]::GetEnvironmentVariable($name) -ne $value) {
+              Add-Content -Path $env:GITHUB_ENV -Value "$name=$value"
+            }
+          }
 
       - name: Cache CPM sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: cpm_cache
           key: cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libs_config.cmake', 'tests/CMakeLists.txt') }}
@@ -95,7 +109,7 @@ jobs:
           cat "results/${RESULT_FILE}"
 
       - name: Upload result
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-${{ matrix.system }}-${{ matrix.compiler }}-cxx${{ matrix.std }}
           path: results/${{ env.RESULT_FILE }}
@@ -113,10 +127,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: benchmark-*
           path: docs/benchmarks
