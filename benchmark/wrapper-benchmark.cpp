@@ -24,6 +24,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -332,6 +333,33 @@ static Stats computeStats(const std::vector<double> &times)
     stats.stddev = std::sqrt(sq_sum / static_cast<double>(times.size()));
 
     return stats;
+}
+
+/**
+ * @brief Formats a count with thousands separators.
+ * @param count Formatted count.
+ * @return Count such as "10,000".
+ */
+static std::string formatCount(const std::size_t count)
+{
+    std::string digits = std::to_string(count);
+    for (std::size_t i = digits.size(); i > 3; i -= 3)
+    {
+        digits.insert(i - 3, ",");
+    }
+    return digits;
+}
+
+/**
+ * @brief Formats the size of a dataset.
+ * @param bytes Size in bytes.
+ * @return Size in kilobytes with two decimal places, e.g. "47.75 KB".
+ */
+static std::string formatSize(const std::size_t bytes)
+{
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(2) << static_cast<double>(bytes) / 1024.0 << " KB";
+    return stream.str();
 }
 
 /**
@@ -1348,17 +1376,23 @@ static void benchmarkInterleavedIncrementalReparse(const std::string   &original
 /////////////////////////////////////////////////////////////////////////////
 
 /**
- * @brief Measures the cost of copying a tree (deep cloning of the pointer handle) using the raw C API.
+ * @brief Measures the cost of copying a tree using the raw C API.
+ * @details A single copy only increments a reference count and allocates a small handle, which is below the resolution
+ * of the stopwatch, so every sample measures a batch of copies. The copies are released outside the measured time.
  * @param tree The AST instance.
  * @param warmups Number of warm up iterations.
- * @param iterations Number of copies.
- * @param times Times.
+ * @param iterations Number of measured iterations.
+ * @param batch Number of copies per iteration.
+ * @param times Time of every batch.
  */
 static void benchmarkCApiTreeCopy(TSTree              *tree,
                                   const std::size_t    warmups,
                                   const std::size_t    iterations,
+                                  const std::size_t    batch,
                                   std::vector<double> &times)
 {
+    std::vector<TSTree *> copies(batch, nullptr);
+
     Stopwatch watch;
     for (std::size_t i = 0; i < warmups + iterations; ++i)
     {
@@ -1369,28 +1403,42 @@ static void benchmarkCApiTreeCopy(TSTree              *tree,
             watch.reset();
         }
 
-        TSTree *copy = ts_tree_copy(tree);
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            copies[j] = ts_tree_copy(tree);
+        }
 
         if (isTesting)
         {
             times.push_back(watch.read());
         }
-        ts_tree_delete(copy);
+
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            ts_tree_delete(copies[j]);
+            copies[j] = nullptr;
+        }
     }
 }
 
 /**
  * @brief Measures the cost of calling the `.copy()` method provided by the C++ wrapper.
+ * @details Every sample measures a batch of copies, see `benchmarkCApiTreeCopy`. The copies are released outside the
+ * measured time.
  * @param tree C++ wrapper AST instance.
  * @param warmups Number of warm up iterations.
- * @param iterations Number of copies.
- * @param times Times.
+ * @param iterations Number of measured iterations.
+ * @param batch Number of copies per iteration.
+ * @param times Time of every batch.
  */
 static void benchmarkCPPWrapperTreeCopy(const ts::Tree      &tree,
                                         const std::size_t    warmups,
                                         const std::size_t    iterations,
+                                        const std::size_t    batch,
                                         std::vector<double> &times)
 {
+    std::vector<ts::Tree> copies(batch, ts::Tree(nullptr));
+
     Stopwatch watch;
     for (std::size_t i = 0; i < warmups + iterations; ++i)
     {
@@ -1401,21 +1449,32 @@ static void benchmarkCPPWrapperTreeCopy(const ts::Tree      &tree,
             watch.reset();
         }
 
-        ts::Tree copy = tree.copy();
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            copies[j] = tree.copy();
+        }
 
         if (isTesting)
         {
             times.push_back(watch.read());
+        }
+
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            copies[j] = ts::Tree(nullptr);
         }
     }
 }
 
 /**
  * @brief Benchmarks tree copying using the C and C++ APIs.
+ * @details Every sample measures a batch of copies, see `benchmarkCApiTreeCopy`. The copies are released outside the
+ * measured time.
  * @param c_tree Tree to copy using the C API.
  * @param cpp_tree Tree to copy using the C++ API.
  * @param warmups Number of warm-up iterations.
  * @param iterations Number of measured iterations.
+ * @param batch Number of copies per iteration.
  * @param c_times Measured C API execution times.
  * @param cpp_times Measured C++ API execution times.
  */
@@ -1423,39 +1482,57 @@ static void benchmarkInterleavedTreeCopy(TSTree              *c_tree,
                                          const ts::Tree      &cpp_tree,
                                          const std::size_t    warmups,
                                          const std::size_t    iterations,
+                                         const std::size_t    batch,
                                          std::vector<double> &c_times,
                                          std::vector<double> &cpp_times)
 {
+    std::vector<TSTree *> c_copies(batch, nullptr);
+    std::vector<ts::Tree> cpp_copies(batch, ts::Tree(nullptr));
+
     Stopwatch watch;
     for (std::size_t i = 0; i < warmups + iterations; ++i)
     {
         const bool isTesting = i >= warmups;
 
-        // 1. C API
         if (isTesting)
         {
             watch.reset();
         }
 
-        TSTree *copy = ts_tree_copy(c_tree);
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            c_copies[j] = ts_tree_copy(c_tree);
+        }
 
         if (isTesting)
         {
             c_times.push_back(watch.read());
         }
-        ts_tree_delete(copy);
 
-        // 2. C++ API
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            ts_tree_delete(c_copies[j]);
+            c_copies[j] = nullptr;
+        }
+
         if (isTesting)
         {
             watch.reset();
         }
 
-        ts::Tree copy_cpp = cpp_tree.copy();
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            cpp_copies[j] = cpp_tree.copy();
+        }
 
         if (isTesting)
         {
             cpp_times.push_back(watch.read());
+        }
+
+        for (std::size_t j = 0; j < batch; ++j)
+        {
+            cpp_copies[j] = ts::Tree(nullptr);
         }
     }
 }
@@ -1927,7 +2004,8 @@ static std::string compilerDescription()
     return "GCC " + std::to_string(__GNUC__) + "." + std::to_string(__GNUC_MINOR__) + "."
          + std::to_string(__GNUC_PATCHLEVEL__);
 #elif defined(_MSC_VER)
-    return "MSVC " + std::to_string(_MSC_FULL_VER);
+    return "MSVC " + std::to_string(_MSC_VER / 100) + "." + std::to_string(_MSC_VER % 100) + "."
+         + std::to_string(_MSC_FULL_VER % 100000);
 #else
     return "Unknown compiler";
 #endif
@@ -2010,6 +2088,7 @@ int main(int argc, char **argv)
     static constexpr const std::size_t QUERY_ITERATIONS       = 100;
     static constexpr const std::size_t INCREMENTAL_ITERATIONS = 100;
     static constexpr const std::size_t COPY_ITERATIONS        = 100;
+    static constexpr const std::size_t COPY_BATCH             = 10000;
 
     std::vector<std::pair<std::string, double>> overhead_summary;
 
@@ -2031,7 +2110,7 @@ int main(int argc, char **argv)
     for (std::size_t d = 0; d < datasets.size(); ++d)
     {
         const Dataset &ds = datasets[d];
-        std::cout << "-- " << ds.label << " (" << ds.source.length() / 1024.0 << " KB) --\n";
+        std::cout << "-- " << ds.label << " (" << formatSize(ds.source.length()) << ") --\n";
 
         std::vector<double> c_times, cpp_times;
         benchmarkCApiParsing(ds.source, WARMUP_ITERATIONS, PARSE_ITERATIONS, c_times);
@@ -2280,7 +2359,7 @@ int main(int argc, char **argv)
     // 5. Tree Copy
     // ---------------------------------------------------------------------
 
-    std::cout << "TREE COPY RESULTS:\n";
+    std::cout << "TREE COPY RESULTS (" << formatCount(COPY_BATCH) << " copies per sample):\n";
     {
         const std::string &source = datasets[2].source; // Flat array (10,000 items)
 
@@ -2296,11 +2375,17 @@ int main(int argc, char **argv)
         ts::Tree     cpp_tree   = cpp_parser.parseString(source);
 
         std::vector<double> c_copy_times, cpp_copy_times;
-        benchmarkCApiTreeCopy(c_tree, WARMUP_ITERATIONS, COPY_ITERATIONS, c_copy_times);
-        benchmarkCPPWrapperTreeCopy(cpp_tree, WARMUP_ITERATIONS, COPY_ITERATIONS, cpp_copy_times);
+        benchmarkCApiTreeCopy(c_tree, WARMUP_ITERATIONS, COPY_ITERATIONS, COPY_BATCH, c_copy_times);
+        benchmarkCPPWrapperTreeCopy(cpp_tree, WARMUP_ITERATIONS, COPY_ITERATIONS, COPY_BATCH, cpp_copy_times);
 
         std::vector<double> c_copy_int, cpp_copy_int;
-        benchmarkInterleavedTreeCopy(c_tree, cpp_tree, WARMUP_ITERATIONS, COPY_ITERATIONS, c_copy_int, cpp_copy_int);
+        benchmarkInterleavedTreeCopy(c_tree,
+                                     cpp_tree,
+                                     WARMUP_ITERATIONS,
+                                     COPY_ITERATIONS,
+                                     COPY_BATCH,
+                                     c_copy_int,
+                                     cpp_copy_int);
 
         printStats("  C API", c_copy_times);
         printStats("  C++ Wrapper", cpp_copy_times);
@@ -2337,7 +2422,7 @@ int main(int argc, char **argv)
     for (std::size_t d = 0; d < datasets.size(); ++d)
     {
         const Dataset &ds = datasets[d];
-        std::cout << "-- " << ds.label << " (" << ds.source.length() / 1024.0 << " KB) --\n";
+        std::cout << "-- " << ds.label << " (" << formatSize(ds.source.length()) << ") --\n";
 
         std::vector<double> c_times, cpp_times;
         benchmarkCApiWasmParsing(ds.source, WARMUP_ITERATIONS, PARSE_ITERATIONS, c_times);
