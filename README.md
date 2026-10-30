@@ -205,23 +205,23 @@ auto tree = parser->tryParseString(source);
 |  **Benchmarks**  |                    No                      |                     Yes                       |
 
 ## Benchmarks
-Does the RAII wrapper actually cost you anything at runtime compared to using the raw tree-sitter C API? Short answer: **no** - across parsing, tree traversal (cursor and `ts::visit`), query matching, incremental reparse, and tree copying, the wrapper's overhead is within a few percent of raw C API, and on several operations it's measured as fast or faster.
+Does the RAII wrapper actually cost you anything at runtime compared to using the raw tree-sitter C API? Short answer: **no**. Measured on 19 configurations (GCC, Clang, AppleClang and MSVC, C++11 to C++23), parsing, cursor traversal, query matching and incremental reparse run at the speed of the C API; only `ts::visit` and tree copies cost about one percent.
 
-|           Category           | Wrapper overhead (median) |
-|:-----------------------------|:--------------------------|
-|           Parsing            |     -7.87 % to +0.57 %    |
-|   Tree traversal (cursor)    |     +0.13 % to +1.21 %    |
-| Tree traversal (`ts::visit`) |     +1.26 % to +2.06 %    |
-|        Query matching        |     +3.28 % to +3.32 %    |
-|     Incremental reparse      |     -1.36 % to +0.71 %    |
-|          Tree copy           |          ±0.00 %          |
+|           Category           | Wrapper overhead (median of all configurations) |
+|:-----------------------------|:------------------------------------------------|
+|           Parsing            |                 -0.1 % to +0.2 %                |
+|   Tree traversal (cursor)    |                 -0.3 % to +0.3 %                |
+| Tree traversal (`ts::visit`) |       +0.7 % to +0.8 % (up to ~4 % with MSVC)   |
+|        Query matching        |           +0.4 % (about +2 % with GCC)          |
+|     Incremental reparse      |                     -0.6 %                      |
+|          Tree copy           |          +1.3 % (below 1 ns per copy)           |
 
-Full methodology, per-scenario numbers, and instructions for reproducing (and extending to C++11/14, C++17, C++20, C++23) live in [`BENCHMARK.md`](docs/BENCHMARK.md).
+Differences below ~2 % are within the noise of the GitHub-hosted runners. Full methodology, per-configuration results and instructions for reproducing them live in [`BENCHMARK.md`](docs/BENCHMARK.md).
 
 To build and run the benchmark suite yourself:
 
 ```bash
-cmake -B build -DCPP_TS_BUILD_BENCHMARK=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCPP_TS_BUILD_BENCHMARK=ON   # add -DCPP_TS_FEATURE_WASM=ON for the Wasm section
 cmake --build build --config Release
 ./build/benchmark/cpp-tree-sitter-benchmark            # add --no-wait to skip the final prompt
 ```
